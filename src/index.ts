@@ -4067,7 +4067,6 @@ app.get('/api/slots', async (req, res) => {
         message: 'Invalid turfId or courtId',
       });
     }
-
     const turfObjectId = new mongoose.Types.ObjectId(String(turfId));
     const courtObjectId = new mongoose.Types.ObjectId(String(courtId));
 
@@ -4245,7 +4244,7 @@ const startServer =
       process.exit(1);
     }
   };
-
+ 
 void startServer();
 
 export default app;
