@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import mongoose, {
   Schema,
   model,
