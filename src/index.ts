@@ -2130,10 +2130,11 @@ app.get('/api/owners/:ownerId/turfs',
 // ==========================================
 
 // ------------------------------------------
-// GET BANK DETAILS
+// GET OWNER BANK DETAILS
 // ------------------------------------------
 
-app.get('/api/owners/:ownerId/bank-details',
+app.get(
+  '/api/owners/:ownerId/bank-details',
   async (
     req: Request,
     res: Response,
@@ -2143,22 +2144,60 @@ app.get('/api/owners/:ownerId/bank-details',
         req.params.ownerId,
       );
 
+      // ------------------------------------
+      // Validate Owner ID
+      // ------------------------------------
+
       if (
         !ownerId ||
         !isValidObjectId(ownerId)
       ) {
         return res.status(400).json({
+          success: false,
           error:
             'Valid Owner ID is required.',
         });
       }
 
+      // ------------------------------------
+      // Check Owner
+      // ------------------------------------
+
+      const owner =
+        await User.findById(ownerId)
+          .select('_id role');
+
+      if (!owner) {
+        return res.status(404).json({
+          success: false,
+          error:
+            'Owner account not found.',
+        });
+      }
+
+      if (owner.role !== 'owner') {
+        return res.status(403).json({
+          success: false,
+          error:
+            'This account is not an owner account.',
+        });
+      }
+
+      // ------------------------------------
+      // Find Owner Bank Details
+      // ------------------------------------
+
       const bankDetails =
         await OwnerBankDetail.findOne({
-          owner: toObjectId(
-            ownerId,
-          ),
-        });
+          accountType: 'owner',
+          owner: toObjectId(ownerId),
+        }).select(
+          '-accountNumber',
+        );
+
+      // ------------------------------------
+      // Response
+      // ------------------------------------
 
       return res.status(200).json({
         success: true,
@@ -2167,24 +2206,27 @@ app.get('/api/owners/:ownerId/bank-details',
       });
     } catch (error) {
       console.error(
-        'Fetch bank details error:',
+        'Fetch owner bank details error:',
         error,
       );
 
       return res.status(500).json({
+        success: false,
         error:
-          'Failed to fetch bank details.',
-        details: getErrorMessage(error),
+          'Failed to fetch owner bank details.',
+        details:
+          getErrorMessage(error),
       });
     }
   },
 );
 
 // ------------------------------------------
-// SAVE / UPDATE BANK DETAILS
+// SAVE / UPDATE OWNER BANK DETAILS
 // ------------------------------------------
 
-app.post('/api/owners/:ownerId/bank-details',
+app.post(
+  '/api/owners/:ownerId/bank-details',
   async (
     req: Request,
     res: Response,
@@ -2194,15 +2236,24 @@ app.post('/api/owners/:ownerId/bank-details',
         req.params.ownerId,
       );
 
+      // ------------------------------------
+      // Validate Owner ID
+      // ------------------------------------
+
       if (
         !ownerId ||
         !isValidObjectId(ownerId)
       ) {
         return res.status(400).json({
+          success: false,
           error:
             'Valid Owner ID is required.',
         });
       }
+
+      // ------------------------------------
+      // Check Owner
+      // ------------------------------------
 
       const owner =
         await User.findById(ownerId)
@@ -2210,6 +2261,7 @@ app.post('/api/owners/:ownerId/bank-details',
 
       if (!owner) {
         return res.status(404).json({
+          success: false,
           error:
             'Owner account not found.',
         });
@@ -2217,94 +2269,239 @@ app.post('/api/owners/:ownerId/bank-details',
 
       if (owner.role !== 'owner') {
         return res.status(403).json({
+          success: false,
           error:
             'Only owner accounts can add bank details.',
         });
       }
 
+      // ------------------------------------
+      // Read Request Body
+      // ------------------------------------
+
       const {
         accountHolderName,
         accountNumber,
         ifscCode,
+        bankName,
+        branchName,
         gatewayAccountId,
       } = req.body;
 
+      // ------------------------------------
+      // Required Fields
+      // ------------------------------------
+
       if (
         !accountHolderName ||
-        !accountNumber ||
-        !ifscCode
+        !String(accountHolderName).trim()
       ) {
         return res.status(400).json({
+          success: false,
           error:
-            'Account holder name, account number, and IFSC code are required.',
+            'Account holder name is required.',
         });
       }
+
+      if (
+        !accountNumber ||
+        !String(accountNumber).trim()
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'Account number is required.',
+        });
+      }
+
+      if (
+        !ifscCode ||
+        !String(ifscCode).trim()
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'IFSC code is required.',
+        });
+      }
+
+      // ------------------------------------
+      // Basic IFSC Validation
+      // Example: SBIN0001234
+      // ------------------------------------
+
+      const normalizedIfsc =
+        String(ifscCode)
+          .trim()
+          .toUpperCase();
+
+      const ifscRegex =
+        /^[A-Z]{4}0[A-Z0-9]{6}$/;
+
+      if (
+        !ifscRegex.test(normalizedIfsc)
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'Invalid IFSC code.',
+        });
+      }
+
+      // ------------------------------------
+      // Normalize Account Number
+      // ------------------------------------
+
+      const normalizedAccountNumber =
+        String(accountNumber)
+          .trim()
+          .replace(/\s+/g, '');
+
+      if (
+        !/^\d{6,30}$/.test(
+          normalizedAccountNumber,
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'Account number must contain 6 to 30 digits.',
+        });
+      }
+
+      // ------------------------------------
+      // Prepare Update
+      // ------------------------------------
+
+      const updateData: any = {
+        accountType: 'owner',
+
+        owner:
+          toObjectId(ownerId),
+
+        accountHolderName:
+          String(accountHolderName).trim(),
+
+        accountNumber:
+          normalizedAccountNumber,
+
+        ifscCode:
+          normalizedIfsc,
+
+        bankName:
+          bankName
+            ? String(bankName).trim()
+            : undefined,
+
+        branchName:
+          branchName
+            ? String(branchName).trim()
+            : undefined,
+      };
+
+      // ------------------------------------
+      // Gateway Account ID
+      //
+      // IMPORTANT:
+      // Do NOT generate fake gateway IDs.
+      // This should come from the actual
+      // payment/payout provider.
+      // ------------------------------------
+
+      if (
+        gatewayAccountId &&
+        String(gatewayAccountId).trim()
+      ) {
+        updateData.gatewayAccountId =
+          String(gatewayAccountId).trim();
+      }
+
+      // ------------------------------------
+      // Find Existing Owner Bank Details
+      // ------------------------------------
+
+      const existingBank =
+        await OwnerBankDetail.findOne({
+          accountType: 'owner',
+          owner: toObjectId(ownerId),
+        });
+
+      // ------------------------------------
+      // Preserve Gateway ID
+      // ------------------------------------
+
+      if (
+        !updateData.gatewayAccountId &&
+        existingBank?.gatewayAccountId
+      ) {
+        updateData.gatewayAccountId =
+          existingBank.gatewayAccountId;
+      }
+
+      // ------------------------------------
+      // Preserve Verification Status
+      //
+      // Owner should NOT be able to mark
+      // their own account as verified.
+      // ------------------------------------
+
+      if (!existingBank) {
+        updateData.isVerified = false;
+      }
+
+      // ------------------------------------
+      // Save / Update
+      // ------------------------------------
 
       const updatedBank =
         await OwnerBankDetail.findOneAndUpdate(
           {
-            owner:
-              toObjectId(ownerId),
+            accountType: 'owner',
+            owner: toObjectId(ownerId),
           },
-
           {
-            owner:
-              toObjectId(ownerId),
-
-            accountHolderName:
-              String(
-                accountHolderName,
-              ).trim(),
-
-            accountNumber:
-              String(
-                accountNumber,
-              ).trim(),
-
-            ifscCode:
-              String(
-                ifscCode,
-              )
-                .trim()
-                .toUpperCase(),
-
-            gatewayAccountId:
-              gatewayAccountId ||
-              `GATEWAY_${Date.now()}`,
+            $set: updateData,
           },
-
           {
             new: true,
             upsert: true,
             runValidators: true,
+            setDefaultsOnInsert: true,
           },
         );
+
+      // ------------------------------------
+      // Response
+      // ------------------------------------
 
       return res.status(200).json({
         success: true,
         message:
-          'Bank details saved successfully.',
+          existingBank
+            ? 'Owner bank details updated successfully.'
+            : 'Owner bank details saved successfully.',
         bankDetails:
           updatedBank,
       });
     } catch (error) {
       console.error(
-        'Save bank details error:',
+        'Save owner bank details error:',
         error,
       );
 
       return res.status(500).json({
         success: false,
         error:
-          'Failed to save bank details.',
-        details: getErrorMessage(error),
+          'Failed to save owner bank details.',
+        details:
+          getErrorMessage(error),
       });
     }
   },
 );
 
 // ------------------------------------------
-// DELETE BANK DETAILS
+// DELETE OWNER BANK DETAILS
 // ------------------------------------------
 
 app.delete(
@@ -2318,15 +2515,24 @@ app.delete(
         req.params.ownerId,
       );
 
+      // ------------------------------------
+      // Validate Owner ID
+      // ------------------------------------
+
       if (
         !ownerId ||
         !isValidObjectId(ownerId)
       ) {
         return res.status(400).json({
+          success: false,
           error:
             'Valid Owner ID is required.',
         });
       }
+
+      // ------------------------------------
+      // Check Owner
+      // ------------------------------------
 
       const owner =
         await User.findById(ownerId)
@@ -2334,6 +2540,7 @@ app.delete(
 
       if (!owner) {
         return res.status(404).json({
+          success: false,
           error:
             'Owner account not found.',
         });
@@ -2341,42 +2548,55 @@ app.delete(
 
       if (owner.role !== 'owner') {
         return res.status(403).json({
+          success: false,
           error:
             'This account is not an owner account.',
         });
       }
 
+      // ------------------------------------
+      // Delete ONLY Owner Bank Details
+      // ------------------------------------
+
       const deletedBank =
-        await OwnerBankDetail.findOneAndDelete(
-          {
-            owner:
-              toObjectId(ownerId),
-          },
-        );
+        await OwnerBankDetail.findOneAndDelete({
+          accountType: 'owner',
+          owner: toObjectId(ownerId),
+        });
+
+      // ------------------------------------
+      // Nothing Found
+      // ------------------------------------
 
       if (!deletedBank) {
         return res.status(404).json({
+          success: false,
           error:
-            'Bank details not found.',
+            'Owner bank details not found.',
         });
       }
+
+      // ------------------------------------
+      // Response
+      // ------------------------------------
 
       return res.status(200).json({
         success: true,
         message:
-          'Bank details deleted successfully.',
+          'Owner bank details deleted successfully.',
       });
     } catch (error) {
       console.error(
-        'Delete bank details error:',
+        'Delete owner bank details error:',
         error,
       );
 
       return res.status(500).json({
         success: false,
         error:
-          'Failed to delete bank details.',
-        details: getErrorMessage(error),
+          'Failed to delete owner bank details.',
+        details:
+          getErrorMessage(error),
       });
     }
   },
