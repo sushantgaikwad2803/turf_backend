@@ -11,7 +11,7 @@ export interface ISlot extends Document {
   updatedAt: Date;
 }
 
-const SlotSchema = new Schema<ISlot>(
+const SlotSchema = new Schema<ISlot>( 
   {
     court: {
       type: Schema.Types.ObjectId,
