@@ -4048,111 +4048,111 @@ app.put(
 // GET /api/slots?turfId=xxx&courtId=xxx&date=YYYY-MM-DD
 // ============================================================
 
-// app.get('/api/slots', async (req, res) => {
-//   try {
-//     const { turfId, courtId, date } = req.query;
+app.get('/api/slots', async (req, res) => {
+  try {
+    const { turfId, courtId, date } = req.query;
 
-//     if (!turfId || !courtId || !date) {
-//       return res.status(400).json({
-//         success: false,
-//         message: 'turfId, courtId and date are required',
-//       });
-//     }
+    if (!turfId || !courtId || !date) {
+      return res.status(400).json({
+        success: false,
+        message: 'turfId, courtId and date are required',
+      });
+    }
 
-//     if (
-//       !mongoose.Types.ObjectId.isValid(String(turfId)) ||
-//       !mongoose.Types.ObjectId.isValid(String(courtId))
-//     ) {
-//       return res.status(400).json({
-//         success: false,
-//         message: 'Invalid turfId or courtId',
-//       });
-//     }
-//     const turfObjectId = new mongoose.Types.ObjectId(String(turfId));
-//     const courtObjectId = new mongoose.Types.ObjectId(String(courtId));
+    if (
+      !mongoose.Types.ObjectId.isValid(String(turfId)) ||
+      !mongoose.Types.ObjectId.isValid(String(courtId))
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid turfId or courtId',
+      });
+    }
+    const turfObjectId = new mongoose.Types.ObjectId(String(turfId));
+    const courtObjectId = new mongoose.Types.ObjectId(String(courtId));
 
-//     // --------------------------------------------------------
-//     // Verify that this court belongs to this turf
-//     // --------------------------------------------------------
-//     const court = await Court.findOne({
-//       _id: courtObjectId,
-//       turf: turfObjectId,
-//     }).lean();
+    // --------------------------------------------------------
+    // Verify that this court belongs to this turf
+    // --------------------------------------------------------
+    const court = await Court.findOne({
+      _id: courtObjectId,
+      turf: turfObjectId,
+    }).lean();
 
-//     if (!court) {
-//       return res.status(404).json({
-//         success: false,
-//         message: 'Court not found for this turf',
-//       });
-//     }
+    if (!court) {
+      return res.status(404).json({
+        success: false,
+        message: 'Court not found for this turf',
+      });
+    }
 
-//     // --------------------------------------------------------
-//     // Convert YYYY-MM-DD into start/end of that day
-//     // --------------------------------------------------------
-//     const dateString = String(date);
+    // --------------------------------------------------------
+    // Convert YYYY-MM-DD into start/end of that day
+    // --------------------------------------------------------
+    const dateString = String(date);
 
-//     const startOfDay = new Date(`${dateString}T00:00:00.000`);
-//     const endOfDay = new Date(`${dateString}T23:59:59.999`);
+    const startOfDay = new Date(`${dateString}T00:00:00.000`);
+    const endOfDay = new Date(`${dateString}T23:59:59.999`);
 
-//     if (
-//       Number.isNaN(startOfDay.getTime()) ||
-//       Number.isNaN(endOfDay.getTime())
-//     ) {
-//       return res.status(400).json({
-//         success: false,
-//         message: 'Invalid date format. Use YYYY-MM-DD',
-//       });
-//     }
+    if (
+      Number.isNaN(startOfDay.getTime()) ||
+      Number.isNaN(endOfDay.getTime())
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid date format. Use YYYY-MM-DD',
+      });
+    }
 
-//     // --------------------------------------------------------
-//     // Find slots for this court and date
-//     // --------------------------------------------------------
-//     const slots = await Slot.find({
-//       court: courtObjectId,
-//       date: {
-//         $gte: startOfDay,
-//         $lte: endOfDay,
-//       },
-//     })
-//       .sort({ startTime: 1 })
-//       .lean();
+    // --------------------------------------------------------
+    // Find slots for this court and date
+    // --------------------------------------------------------
+    const slots = await Slot.find({
+      court: courtObjectId,
+      date: {
+        $gte: startOfDay,
+        $lte: endOfDay,
+      },
+    })
+      .sort({ startTime: 1 })
+      .lean();
 
-//     // --------------------------------------------------------
-//     // Frontend expects bookedSlots
-//     // --------------------------------------------------------
-//     const bookedSlots = slots
-//       .filter(
-//         (slot) =>
-//           slot.status === 'booked' ||
-//           slot.status === 'reserved' ||
-//           slot.status === 'blocked',
-//       )
-//       .map((slot) => ({
-//         slotId: `${dateString}_${courtId}_${slot.startTime}`,
-//         startTime: slot.startTime,
-//         endTime: slot.endTime,
-//         status: slot.status,
-//         price: slot.price,
-//       }));
+    // --------------------------------------------------------
+    // Frontend expects bookedSlots
+    // --------------------------------------------------------
+    const bookedSlots = slots
+      .filter(
+        (slot) =>
+          slot.status === 'booked' ||
+          slot.status === 'reserved' ||
+          slot.status === 'blocked',
+      )
+      .map((slot) => ({
+        slotId: `${dateString}_${courtId}_${slot.startTime}`,
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+        status: slot.status,
+        price: slot.price,
+      }));
 
-//     return res.status(200).json({
-//       success: true,
-//       date: dateString,
-//       turfId: String(turfId),
-//       courtId: String(courtId),
-//       slots,
-//       bookedSlots,
-//     });
-//   } catch (error) {
-//     console.error('GET /api/slots error:', error);
+    return res.status(200).json({
+      success: true,
+      date: dateString,
+      turfId: String(turfId),
+      courtId: String(courtId),
+      slots,
+      bookedSlots,
+    });
+  } catch (error) {
+    console.error('GET /api/slots error:', error);
 
-//     return res.status(500).json({
-//       success: false,
-//       message: 'Failed to load slots',
-//       error: error instanceof Error ? error.message : 'Unknown error',
-//     });
-//   }
-// });
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load slots',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
 
 // ==========================================
 // 404 HANDLER
