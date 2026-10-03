@@ -1012,7 +1012,8 @@ app.post('/api/upload/turf-image',
 // GET COURTS FOR TURF
 // ------------------------------------------
 
-app.get('/api/turfs/:turfId/courts',
+app.get(
+  '/api/turfs/:turfId/courts',
   async (
     req: Request,
     res: Response,
@@ -1027,6 +1028,7 @@ app.get('/api/turfs/:turfId/courts',
         !isValidObjectId(turfId)
       ) {
         return res.status(400).json({
+          success: false,
           error: 'Invalid Turf ID.',
         });
       }
@@ -1037,6 +1039,7 @@ app.get('/api/turfs/:turfId/courts',
 
       if (!turf) {
         return res.status(404).json({
+          success: false,
           error: 'Turf not found.',
         });
       }
@@ -1060,6 +1063,7 @@ app.get('/api/turfs/:turfId/courts',
       );
 
       return res.status(500).json({
+        success: false,
         error: 'Failed to fetch courts.',
         details: getErrorMessage(error),
       });
@@ -1082,22 +1086,16 @@ function validateNightPricing(
   }
 
   if (
-    typeof nightPricePerHour !==
-      'number' ||
-    !Number.isFinite(
-      nightPricePerHour,
-    ) ||
+    typeof nightPricePerHour !== 'number' ||
+    !Number.isFinite(nightPricePerHour) ||
     nightPricePerHour < 0
   ) {
     return 'Night price per hour must be a non-negative number.';
   }
 
   if (
-    typeof nightStartHour !==
-      'number' ||
-    !Number.isInteger(
-      nightStartHour,
-    ) ||
+    typeof nightStartHour !== 'number' ||
+    !Number.isInteger(nightStartHour) ||
     nightStartHour < 0 ||
     nightStartHour > 23
   ) {
@@ -1105,11 +1103,8 @@ function validateNightPricing(
   }
 
   if (
-    typeof nightEndHour !==
-      'number' ||
-    !Number.isInteger(
-      nightEndHour,
-    ) ||
+    typeof nightEndHour !== 'number' ||
+    !Number.isInteger(nightEndHour) ||
     nightEndHour < 0 ||
     nightEndHour > 23
   ) {
@@ -1117,10 +1112,40 @@ function validateNightPricing(
   }
 
   if (
-    nightStartHour ===
-    nightEndHour
+    nightStartHour === nightEndHour
   ) {
     return 'Night start and end hours cannot be the same.';
+  }
+
+  return null;
+}
+
+// ------------------------------------------
+// FULL DAY DISCOUNT VALIDATION
+// ------------------------------------------
+
+function validateFullDayDiscount(
+  fullDayDiscountPercent: unknown,
+): string | null {
+  if (
+    typeof fullDayDiscountPercent !==
+      'number' ||
+    !Number.isFinite(
+      fullDayDiscountPercent,
+    )
+  ) {
+    return (
+      'Full day discount percentage must be a valid number.'
+    );
+  }
+
+  if (
+    fullDayDiscountPercent < 0 ||
+    fullDayDiscountPercent > 100
+  ) {
+    return (
+      'Full day discount percentage must be between 0 and 100.'
+    );
   }
 
   return null;
@@ -1130,20 +1155,34 @@ function validateNightPricing(
 // CREATE COURT
 // ------------------------------------------
 
-app.post('/api/courts',
-  async (req: Request, res: Response) => {
+app.post(
+  '/api/courts',
+  async (
+    req: Request,
+    res: Response,
+  ) => {
     try {
       const {
         turf,
         name,
         sport,
         pricePerHour,
+
+        // Night pricing
         hasNightPricing = false,
         nightPricePerHour,
         nightStartHour,
         nightEndHour,
+
+        // Full day discount
+        fullDayDiscountPercent = 4,
+
         status,
       } = req.body;
+
+      // --------------------------------------
+      // REQUIRED FIELDS
+      // --------------------------------------
 
       if (
         !turf ||
@@ -1152,16 +1191,26 @@ app.post('/api/courts',
         pricePerHour == null
       ) {
         return res.status(400).json({
+          success: false,
           error:
             'Turf ID, name, sport, and price per hour are required.',
         });
       }
 
+      // --------------------------------------
+      // TURF ID VALIDATION
+      // --------------------------------------
+
       if (!isValidObjectId(turf)) {
         return res.status(400).json({
+          success: false,
           error: 'Invalid Turf ID.',
         });
       }
+
+      // --------------------------------------
+      // CHECK TURF
+      // --------------------------------------
 
       const parentTurf =
         await Turf.findById(turf)
@@ -1171,9 +1220,14 @@ app.post('/api/courts',
 
       if (!parentTurf) {
         return res.status(404).json({
+          success: false,
           error: 'Turf not found.',
         });
       }
+
+      // --------------------------------------
+      // NORMAL PRICE VALIDATION
+      // --------------------------------------
 
       if (
         typeof pricePerHour !==
@@ -1184,10 +1238,15 @@ app.post('/api/courts',
         pricePerHour < 0
       ) {
         return res.status(400).json({
+          success: false,
           error:
             'Price per hour must be a valid non-negative number.',
         });
       }
+
+      // --------------------------------------
+      // NIGHT PRICING VALIDATION
+      // --------------------------------------
 
       const nightPricingError =
         validateNightPricing(
@@ -1201,9 +1260,30 @@ app.post('/api/courts',
 
       if (nightPricingError) {
         return res.status(400).json({
+          success: false,
           error: nightPricingError,
         });
       }
+
+      // --------------------------------------
+      // FULL DAY DISCOUNT VALIDATION
+      // --------------------------------------
+
+      const fullDayDiscountError =
+        validateFullDayDiscount(
+          fullDayDiscountPercent,
+        );
+
+      if (fullDayDiscountError) {
+        return res.status(400).json({
+          success: false,
+          error: fullDayDiscountError,
+        });
+      }
+
+      // --------------------------------------
+      // CREATE COURT
+      // --------------------------------------
 
       const newCourt =
         new Court({
@@ -1219,6 +1299,7 @@ app.post('/api/courts',
 
           pricePerHour,
 
+          // Night pricing
           hasNightPricing:
             Boolean(
               hasNightPricing,
@@ -1232,6 +1313,10 @@ app.post('/api/courts',
               }
             : {}),
 
+          // Full day discount
+          fullDayDiscountPercent,
+
+          // Status
           status:
             status || 'active',
         });
@@ -1241,8 +1326,10 @@ app.post('/api/courts',
 
       return res.status(201).json({
         success: true,
+
         message:
           'Court created successfully.',
+
         court: savedCourt,
       });
     } catch (error) {
@@ -1253,9 +1340,12 @@ app.post('/api/courts',
 
       return res.status(400).json({
         success: false,
+
         error:
           'Failed to create court.',
-        details: getErrorMessage(error),
+
+        details:
+          getErrorMessage(error),
       });
     }
   },
@@ -1267,18 +1357,30 @@ app.post('/api/courts',
 
 app.put(
   '/api/courts/:id',
-  async (req: Request, res: Response) => {
+  async (
+    req: Request,
+    res: Response,
+  ) => {
     try {
-      const courtId = getParam(
-        req.params.id,
-      );
+      const courtId =
+        getParam(
+          req.params.id,
+        );
+
+      // --------------------------------------
+      // COURT ID VALIDATION
+      // --------------------------------------
 
       if (
         !courtId ||
-        !isValidObjectId(courtId)
+        !isValidObjectId(
+          courtId,
+        )
       ) {
         return res.status(400).json({
-          error: 'Invalid Court ID.',
+          success: false,
+          error:
+            'Invalid Court ID.',
         });
       }
 
@@ -1286,12 +1388,22 @@ app.put(
         name,
         sport,
         pricePerHour,
+
+        // Night pricing
         hasNightPricing = false,
         nightPricePerHour,
         nightStartHour,
         nightEndHour,
+
+        // Full day discount
+        fullDayDiscountPercent = 4,
+
         status,
       } = req.body;
+
+      // --------------------------------------
+      // REQUIRED FIELDS
+      // --------------------------------------
 
       if (
         !name ||
@@ -1299,10 +1411,15 @@ app.put(
         pricePerHour == null
       ) {
         return res.status(400).json({
+          success: false,
           error:
             'Name, sport, and price per hour are required.',
         });
       }
+
+      // --------------------------------------
+      // NORMAL PRICE VALIDATION
+      // --------------------------------------
 
       if (
         typeof pricePerHour !==
@@ -1313,10 +1430,15 @@ app.put(
         pricePerHour < 0
       ) {
         return res.status(400).json({
+          success: false,
           error:
             'Price per hour must be a valid non-negative number.',
         });
       }
+
+      // --------------------------------------
+      // NIGHT PRICING VALIDATION
+      // --------------------------------------
 
       const nightPricingError =
         validateNightPricing(
@@ -1330,9 +1452,31 @@ app.put(
 
       if (nightPricingError) {
         return res.status(400).json({
+          success: false,
           error: nightPricingError,
         });
       }
+
+      // --------------------------------------
+      // FULL DAY DISCOUNT VALIDATION
+      // --------------------------------------
+
+      const fullDayDiscountError =
+        validateFullDayDiscount(
+          fullDayDiscountPercent,
+        );
+
+      if (fullDayDiscountError) {
+        return res.status(400).json({
+          success: false,
+          error:
+            fullDayDiscountError,
+        });
+      }
+
+      // --------------------------------------
+      // FIND EXISTING COURT
+      // --------------------------------------
 
       const existingCourt =
         await Court.findById(
@@ -1341,14 +1485,18 @@ app.put(
 
       if (!existingCourt) {
         return res.status(404).json({
-          error: 'Court not found.',
+          success: false,
+          error:
+            'Court not found.',
         });
       }
 
-      const updatePayload: Record<
-        string,
-        unknown
-      > = {
+      // --------------------------------------
+      // UPDATE PAYLOAD
+      // --------------------------------------
+
+      const updatePayload:
+        Record<string, unknown> = {
         name: String(
           name,
         ).trim(),
@@ -1364,19 +1512,32 @@ app.put(
             hasNightPricing,
           ),
 
+        // IMPORTANT:
+        // Store the full day discount
+        fullDayDiscountPercent,
+
         status:
           status ||
           existingCourt.status,
       };
 
-      if (hasNightPricing) {
-        updatePayload.nightPricePerHour =
+      // --------------------------------------
+      // NIGHT PRICING
+      // --------------------------------------
+
+      if (
+        hasNightPricing
+      ) {
+        updatePayload
+          .nightPricePerHour =
           nightPricePerHour;
 
-        updatePayload.nightStartHour =
+        updatePayload
+          .nightStartHour =
           nightStartHour;
 
-        updatePayload.nightEndHour =
+        updatePayload
+          .nightEndHour =
           nightEndHour;
       } else {
         updatePayload.$unset = {
@@ -1385,6 +1546,10 @@ app.put(
           nightEndHour: 1,
         };
       }
+
+      // --------------------------------------
+      // UPDATE COURT
+      // --------------------------------------
 
       const updatedCourt =
         await Court.findByIdAndUpdate(
@@ -1398,9 +1563,12 @@ app.put(
 
       return res.status(200).json({
         success: true,
+
         message:
           'Court updated successfully.',
-        court: updatedCourt,
+
+        court:
+          updatedCourt,
       });
     } catch (error) {
       console.error(
@@ -1410,9 +1578,12 @@ app.put(
 
       return res.status(400).json({
         success: false,
+
         error:
           'Failed to update court.',
-        details: getErrorMessage(error),
+
+        details:
+          getErrorMessage(error),
       });
     }
   },
@@ -1424,18 +1595,26 @@ app.put(
 
 app.delete(
   '/api/courts/:id',
-  async (req: Request, res: Response) => {
+  async (
+    req: Request,
+    res: Response,
+  ) => {
     try {
-      const courtId = getParam(
-        req.params.id,
-      );
+      const courtId =
+        getParam(
+          req.params.id,
+        );
 
       if (
         !courtId ||
-        !isValidObjectId(courtId)
+        !isValidObjectId(
+          courtId,
+        )
       ) {
         return res.status(400).json({
-          error: 'Invalid Court ID.',
+          success: false,
+          error:
+            'Invalid Court ID.',
         });
       }
 
@@ -1446,7 +1625,9 @@ app.delete(
 
       if (!court) {
         return res.status(404).json({
-          error: 'Court not found.',
+          success: false,
+          error:
+            'Court not found.',
         });
       }
 
@@ -1456,9 +1637,12 @@ app.delete(
 
       return res.status(200).json({
         success: true,
+
         message:
           'Court deleted successfully.',
-        deletedCourtId: courtId,
+
+        deletedCourtId:
+          courtId,
       });
     } catch (error) {
       console.error(
@@ -1468,9 +1652,12 @@ app.delete(
 
       return res.status(500).json({
         success: false,
+
         error:
           'Failed to delete court.',
-        details: getErrorMessage(error),
+
+        details:
+          getErrorMessage(error),
       });
     }
   },
@@ -4263,130 +4450,37 @@ app.put(
   },
 );
 
+// ============================================================
+// GET BOOKED SLOTS
+// GET /api/slots?turfId=xxx&courtId=xxx&date=YYYY-MM-DD
+// ============================================================
+
 app.get('/api/slots', async (req, res) => {
   try {
-    // --------------------------------------------------
-    // Safely read Express query parameters
-    // This avoids ParsedQs TypeScript errors
-    // --------------------------------------------------
+    const { turfId, courtId, date } = req.query;
 
-    const turfId =
-      typeof req.query.turfId === 'string'
-        ? req.query.turfId
-        : undefined;
-
-    const courtId =
-      typeof req.query.courtId === 'string'
-        ? req.query.courtId
-        : undefined;
-
-    const dateString =
-      typeof req.query.date === 'string'
-        ? req.query.date
-        : undefined;
-
-    // --------------------------------------------------
-    // Required parameters
-    // --------------------------------------------------
-
-    if (!turfId || !courtId || !dateString) {
+    if (!turfId || !courtId || !date) {
       return res.status(400).json({
         success: false,
-        message:
-          'turfId, courtId and date are required',
+        message: 'turfId, courtId and date are required',
       });
     }
-
-    // --------------------------------------------------
-    // Validate Turf ID
-    // --------------------------------------------------
-
-    if (!isValidObjectId(turfId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid turfId',
-      });
-    }
-
-    // --------------------------------------------------
-    // Validate Court ID
-    // --------------------------------------------------
-
-    if (!isValidObjectId(courtId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid courtId',
-      });
-    }
-
-    // --------------------------------------------------
-    // Validate date
-    // --------------------------------------------------
-
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
-      return res.status(400).json({
-        success: false,
-        message:
-          'Invalid date format. Use YYYY-MM-DD',
-      });
-    }
-
-    // --------------------------------------------------
-    // Convert IDs
-    // --------------------------------------------------
-
-    const turfObjectId = toObjectId(turfId);
-    const courtObjectId = toObjectId(courtId);
-
-    if (!turfObjectId || !courtObjectId) {
-      return res.status(400).json({
-        success: false,
-        message:
-          'Invalid turfId or courtId',
-      });
-    }
-
-    // --------------------------------------------------
-    // Create requested date range
-    // --------------------------------------------------
-
-    const startOfDay = new Date(
-      `${dateString}T00:00:00.000`,
-    );
-
-    const endOfDay = new Date(
-      `${dateString}T23:59:59.999`,
-    );
 
     if (
-      Number.isNaN(startOfDay.getTime()) ||
-      Number.isNaN(endOfDay.getTime())
+      !mongoose.Types.ObjectId.isValid(String(turfId)) ||
+      !mongoose.Types.ObjectId.isValid(String(courtId))
     ) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid date',
+        message: 'Invalid turfId or courtId',
       });
     }
+    const turfObjectId = new mongoose.Types.ObjectId(String(turfId));
+    const courtObjectId = new mongoose.Types.ObjectId(String(courtId));
 
-    // --------------------------------------------------
-    // Find Turf
-    // --------------------------------------------------
-
-    const turf = await Turf.findById(
-      turfObjectId,
-    ).lean();
-
-    if (!turf) {
-      return res.status(404).json({
-        success: false,
-        message: 'Turf not found',
-      });
-    }
-
-    // --------------------------------------------------
-    // Find Court belonging to Turf
-    // --------------------------------------------------
-
+    // --------------------------------------------------------
+    // Verify that this court belongs to this turf
+    // --------------------------------------------------------
     const court = await Court.findOne({
       _id: courtObjectId,
       turf: turfObjectId,
@@ -4395,15 +4489,31 @@ app.get('/api/slots', async (req, res) => {
     if (!court) {
       return res.status(404).json({
         success: false,
-        message:
-          'Court not found for this turf',
+        message: 'Court not found for this turf',
       });
     }
 
-    // --------------------------------------------------
-    // Get slots for selected date
-    // --------------------------------------------------
+    // --------------------------------------------------------
+    // Convert YYYY-MM-DD into start/end of that day
+    // --------------------------------------------------------
+    const dateString = String(date);
 
+    const startOfDay = new Date(`${dateString}T00:00:00.000`);
+    const endOfDay = new Date(`${dateString}T23:59:59.999`);
+
+    if (
+      Number.isNaN(startOfDay.getTime()) ||
+      Number.isNaN(endOfDay.getTime())
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid date format. Use YYYY-MM-DD',
+      });
+    }
+
+    // --------------------------------------------------------
+    // Find slots for this court and date
+    // --------------------------------------------------------
     const slots = await Slot.find({
       court: courtObjectId,
       date: {
@@ -4411,131 +4521,42 @@ app.get('/api/slots', async (req, res) => {
         $lte: endOfDay,
       },
     })
-      .sort({
-        startTime: 1,
-      })
+      .sort({ startTime: 1 })
       .lean();
 
-    // --------------------------------------------------
-    // Available slots
-    // --------------------------------------------------
-
-    const availableSlots = slots.filter(
-      (slot) =>
-        slot.status === 'available',
-    );
-
-    // --------------------------------------------------
-    // Booked / Reserved / Blocked slots
-    // --------------------------------------------------
-
-    const unavailableSlots = slots.filter(
-      (slot) =>
-        slot.status === 'booked' ||
-        slot.status === 'reserved' ||
-        slot.status === 'blocked',
-    );
-
-    // --------------------------------------------------
-    // Format booked slots
-    // --------------------------------------------------
-
-    const bookedSlots =
-      unavailableSlots.map((slot) => ({
-        slotId: slot._id,
-        courtId: slot.court,
-        date: dateString,
+    // --------------------------------------------------------
+    // Frontend expects bookedSlots
+    // --------------------------------------------------------
+    const bookedSlots = slots
+      .filter(
+        (slot) =>
+          slot.status === 'booked' ||
+          slot.status === 'reserved' ||
+          slot.status === 'blocked',
+      )
+      .map((slot) => ({
+        slotId: `${dateString}_${courtId}_${slot.startTime}`,
         startTime: slot.startTime,
         endTime: slot.endTime,
-        price: slot.price,
         status: slot.status,
-      }));
-
-    // --------------------------------------------------
-    // Format available slots
-    // --------------------------------------------------
-
-    const availableSlotList =
-      availableSlots.map((slot) => ({
-        slotId: slot._id,
-        courtId: slot.court,
-        date: dateString,
-        startTime: slot.startTime,
-        endTime: slot.endTime,
         price: slot.price,
-        status: slot.status,
       }));
-
-    // --------------------------------------------------
-    // 24-hour check
-    // --------------------------------------------------
-
-    const is24Hours =
-      slots.length === 24;
-
-    // --------------------------------------------------
-    // Response
-    // --------------------------------------------------
 
     return res.status(200).json({
       success: true,
-
-      message: is24Hours
-        ? '24-hour slots fetched successfully'
-        : 'Slots fetched successfully',
-
       date: dateString,
-
-      turfId: turfObjectId,
-
-      courtId: courtObjectId,
-
-      is24Hours,
-
-      totalSlots: slots.length,
-
-      availableSlots:
-        availableSlots.length,
-
-      unavailableSlots:
-        unavailableSlots.length,
-
-      bookedSlots:
-        bookedSlots.length,
-
-      turf: {
-        _id: turf._id,
-        name: turf.name,
-        city: turf.city,
-      },
-
-      court: {
-        _id: court._id,
-        name: court.name,
-        sport: court.sport,
-        pricePerHour:
-          court.pricePerHour,
-        status: court.status,
-      },
-
+      turfId: String(turfId),
+      courtId: String(courtId),
       slots,
-
-      available:
-        availableSlotList,
-
-      booked:
-        bookedSlots,
+      bookedSlots,
     });
   } catch (error) {
-    console.error(
-      'GET /api/slots error:',
-      error,
-    );
+    console.error('GET /api/slots error:', error);
 
     return res.status(500).json({
       success: false,
-      message:
-        getErrorMessage(error),
+      message: 'Failed to load slots',
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
   }
 });
