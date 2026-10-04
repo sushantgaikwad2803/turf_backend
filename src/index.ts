@@ -336,309 +336,482 @@ app.get('/api/health',
 // TURF ROUTES
 // ==========================================
 
-// ------------------------------------------
-// GET ALL ACTIVE TURFS
-// Includes active courts
-// ------------------------------------------
+// =====================================================
+// GET ALL TURFS
+// GET /api/turfs
+// =====================================================
 
-app.get('/api/turfs',
-  async (_req: Request, res: Response) => {
+app.get(
+  '/api/turfs',
+  async (
+    _req: Request,
+    res: Response,
+  ) => {
     try {
-      const turfs = await Turf.find({
-        status: 'active',
-      })
-        .sort({ createdAt: -1 })
-        .lean();
-
-      const turfIds = turfs.map(
-        (turf) => turf._id,
-      );
-
-      let courts: any[] = [];
-
-      if (turfIds.length > 0) {
-        courts = await Court.find({
-          turf: {
-            $in: turfIds,
-          },
-
-          status: 'active',
-        })
-          .sort({ createdAt: 1 })
+      const turfs =
+        await Turf.find({})
+          .sort({
+            createdAt: -1,
+          })
           .lean();
-      }
-
-      const courtsByTurf =
-        new Map<string, any[]>();
-
-      for (const court of courts) {
-        const turfId =
-          court.turf.toString();
-
-        if (!courtsByTurf.has(turfId)) {
-          courtsByTurf.set(turfId, []);
-        }
-
-        courtsByTurf
-          .get(turfId)!
-          .push(court);
-      }
-
-      const turfList = turfs.map(
-        (turf) => ({
-          ...turf,
-
-          courts:
-            courtsByTurf.get(
-              turf._id.toString(),
-            ) || [],
-        }),
-      );
 
       return res.status(200).json({
         success: true,
-        count: turfList.length,
-        turfs: turfList,
+        count: turfs.length,
+        turfs,
       });
     } catch (error) {
       console.error(
-        'Fetch turfs error:',
+        'FETCH TURFS ERROR:',
         error,
       );
 
       return res.status(500).json({
         success: false,
-        error: 'Failed to fetch turfs',
+        error: 'Failed to fetch turfs.',
         details: getErrorMessage(error),
       });
     }
   },
 );
 
-// ------------------------------------------
-// CREATE TURF
-// ------------------------------------------
 
-app.post('/api/turfs',
-  async (req: Request, res: Response) => {
+// =====================================================
+// GET SINGLE TURF
+// GET /api/turfs/:id
+// =====================================================
+
+app.get(
+  '/api/turfs/:id',
+  async (
+    req: Request,
+    res: Response,
+  ) => {
     try {
+      const { id } = req.params;
+
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          error: 'Turf ID is required.',
+        });
+      }
+
+      const turf =
+        await Turf.findById(id).lean();
+
+      if (!turf) {
+        return res.status(404).json({
+          success: false,
+          error: 'Turf not found.',
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        turf,
+      });
+    } catch (error) {
+      console.error(
+        'GET TURF ERROR:',
+        error,
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to fetch turf.',
+        details: getErrorMessage(error),
+      });
+    }
+  },
+);
+
+
+// =====================================================
+// CREATE TURF
+// POST /api/turfs
+// =====================================================
+
+app.post(
+  '/api/turfs',
+  async (
+    req: Request,
+    res: Response,
+  ) => {
+    try {
+      console.log(
+        '========================================',
+      );
+
+      console.log(
+        'CREATE TURF REQUEST',
+      );
+
+      console.log(
+        'REQUEST BODY:',
+        JSON.stringify(
+          req.body,
+          null,
+          2,
+        ),
+      );
+
+      console.log(
+        '========================================',
+      );
+
+
+      // =================================================
+      // GET DATA FROM REQUEST
+      // =================================================
+
       const {
-        owner,
         name,
         description,
         address,
         city,
-        location,
-        images,
         amenities,
-        sports,
-        openingTime,
-        closingTime,
-        operatingHours,
+        images,
       } = req.body;
 
-      // --------------------------------------------------
-      // 1. Validate required fields
-      // --------------------------------------------------
+
+      // =================================================
+      // VALIDATE NAME
+      // =================================================
+
       if (
-        !owner ||
-        !name ||
-        !address ||
-        !city ||
-        !location ||
-        !location.coordinates
+        typeof name !== 'string' ||
+        name.trim().length === 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: 'Turf name is required.',
+        });
+      }
+
+
+      // =================================================
+      // VALIDATE ADDRESS
+      // =================================================
+
+      if (
+        typeof address !== 'string' ||
+        address.trim().length === 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: 'Turf address is required.',
+        });
+      }
+
+
+      // =================================================
+      // VALIDATE CITY
+      // =================================================
+
+      if (
+        typeof city !== 'string' ||
+        city.trim().length === 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: 'Turf city is required.',
+        });
+      }
+
+
+      // =================================================
+      // VALIDATE DESCRIPTION
+      // =================================================
+
+      if (
+        description !== undefined &&
+        description !== null &&
+        typeof description !== 'string'
       ) {
         return res.status(400).json({
           success: false,
           error:
-            'Owner, name, address, city, and location coordinates are required.',
+            'Description must be a string.',
         });
       }
 
-      // --------------------------------------------------
-      // 2. Validate owner ID
-      // --------------------------------------------------
-      if (!isValidObjectId(owner)) {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid Owner ID.',
-        });
-      }
 
-      // --------------------------------------------------
-      // 3. Check owner account
-      // --------------------------------------------------
-      const ownerUser = await User.findById(owner).select(
-        '_id role',
-      );
-
-      if (!ownerUser) {
-        return res.status(404).json({
-          success: false,
-          error: 'Owner account not found.',
-        });
-      }
-
-      if (ownerUser.role !== 'owner') {
-        return res.status(403).json({
-          success: false,
-          error:
-            'Only owner accounts can create turfs.',
-        });
-      }
-
-      // --------------------------------------------------
-      // 4. Validate location coordinates
-      //    GeoJSON format:
-      //    [longitude, latitude]
-      // --------------------------------------------------
-      const coordinates = location.coordinates;
+      // =================================================
+      // VALIDATE AMENITIES
+      // =================================================
 
       if (
-        !Array.isArray(coordinates) ||
-        coordinates.length !== 2 ||
-        typeof coordinates[0] !== 'number' ||
-        typeof coordinates[1] !== 'number'
+        amenities !== undefined &&
+        !Array.isArray(amenities)
       ) {
         return res.status(400).json({
           success: false,
           error:
-            'Location must contain [longitude, latitude].',
+            'Amenities must be an array.',
         });
       }
 
-      const longitude = Number(coordinates[0]);
-      const latitude = Number(coordinates[1]);
 
-      // --------------------------------------------------
-      // 5. Validate longitude / latitude ranges
-      // --------------------------------------------------
+      // =================================================
+      // VALIDATE IMAGES
+      // =================================================
+
       if (
-        longitude < -180 ||
-        longitude > 180
+        images !== undefined &&
+        !Array.isArray(images)
       ) {
         return res.status(400).json({
           success: false,
-          error: 'Invalid longitude value.',
+          error:
+            'Images must be an array.',
         });
       }
+
+
+      // =================================================
+      // CLEAN AMENITIES
+      // =================================================
+
+      const cleanAmenities: string[] =
+        Array.isArray(amenities)
+          ? amenities
+              .filter(
+                (
+                  item,
+                ): item is string =>
+                  typeof item ===
+                  'string',
+              )
+              .map(
+                (
+                  item,
+                ) =>
+                  item.trim(),
+              )
+              .filter(
+                (
+                  item,
+                ) =>
+                  item.length > 0,
+              )
+          : [];
+
+
+      // =================================================
+      // CLEAN IMAGES
+      // =================================================
+
+      const cleanImages: {
+        url: string;
+        isPrimary: boolean;
+      }[] =
+        Array.isArray(images)
+          ? images
+              .filter(
+                (
+                  image,
+                ) =>
+                  image !== null &&
+                  typeof image ===
+                    'object' &&
+                  typeof image.url ===
+                    'string' &&
+                  image.url.trim()
+                    .length > 0,
+              )
+              .map(
+                (
+                  image,
+                ) => ({
+                  url:
+                    image.url.trim(),
+
+                  isPrimary:
+                    Boolean(
+                      image.isPrimary,
+                    ),
+                }),
+              )
+          : [];
+
+
+      // =================================================
+      // HANDLE PRIMARY IMAGE
+      // =================================================
 
       if (
-        latitude < -90 ||
-        latitude > 90
+        cleanImages.length > 0
       ) {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid latitude value.',
-        });
+        const primaryIndex =
+          cleanImages.findIndex(
+            (
+              image,
+            ) =>
+              image.isPrimary ===
+              true,
+          );
+
+
+        // -----------------------------------------------
+        // NO PRIMARY IMAGE
+        // -----------------------------------------------
+
+        if (
+          primaryIndex === -1
+        ) {
+          const firstImage =
+            cleanImages.at(0);
+
+          if (firstImage) {
+            firstImage.isPrimary =
+              true;
+          }
+        }
+
+
+        // -----------------------------------------------
+        // PRIMARY IMAGE EXISTS
+        // -----------------------------------------------
+
+        else {
+          cleanImages.forEach(
+            (
+              image,
+              index,
+            ) => {
+              image.isPrimary =
+                index ===
+                primaryIndex;
+            },
+          );
+        }
       }
 
-      // --------------------------------------------------
-      // 6. Create turf
-      //
-      // IMPORTANT:
-      // New turf is ALWAYS:
-      //
-      // approvalStatus = pending
-      // status         = inactive
-      //
-      // Do NOT take these values from req.body.
-      // --------------------------------------------------
-      const newTurf = new Turf({
-        owner: toObjectId(owner),
 
-        name: String(name).trim(),
+      // =================================================
+      // CREATE TURF DATA
+      // =================================================
+
+      const turfData = {
+        name:
+          name.trim(),
 
         description:
-          typeof description === 'string'
+          typeof description ===
+          'string'
             ? description.trim()
             : '',
 
-        address: String(address).trim(),
+        address:
+          address.trim(),
 
-        city: String(city).trim(),
-
-        pricePerHour: 500,
-
-        sports:
-          Array.isArray(sports) && sports.length > 0
-            ? sports
-            : ['cricket', 'football'],
-
-        openingTime:
-          openingTime || '06:00 AM',
-
-        closingTime:
-          closingTime || '11:00 PM',
-
-        operatingHours:
-          Array.isArray(operatingHours)
-            ? operatingHours
-            : [],
-
-        location: {
-          type: 'Point',
-          coordinates: [
-            longitude,
-            latitude,
-          ],
-        },
-
-        images:
-          Array.isArray(images)
-            ? images
-            : [],
+        city:
+          city.trim(),
 
         amenities:
-          Array.isArray(amenities)
-            ? amenities
-            : [],
+          cleanAmenities,
 
-        // ----------------------------------------------
-        // ADMIN APPROVAL FLOW
-        // ----------------------------------------------
+        images:
+          cleanImages,
+      };
 
-        // Turf waits for admin approval
-        approvalStatus: 'pending',
 
-        // Turf must NOT be visible to customers
-        status: 'inactive',
+      // =================================================
+      // LOG DATA BEFORE SAVE
+      // =================================================
 
-        // No rejection information initially
-        rejectionReason: '',
+      console.log(
+        'TURF DATA TO SAVE:',
+        JSON.stringify(
+          turfData,
+          null,
+          2,
+        ),
+      );
 
-        // No admin approval yet
-        approvedAt: null,
 
-        approvedBy: null,
-      });
+      // =================================================
+      // CREATE TURF
+      // =================================================
 
-      // --------------------------------------------------
-      // 7. Save turf
-      // --------------------------------------------------
-      const savedTurf = await newTurf.save();
+      const newTurf =
+        new Turf(
+          turfData,
+        );
 
-      // --------------------------------------------------
-      // 8. Response
-      // --------------------------------------------------
+
+      // =================================================
+      // SAVE TURF
+      // =================================================
+
+      const savedTurf =
+        await newTurf.save();
+
+
+      // =================================================
+      // SUCCESS
+      // =================================================
+
+      console.log(
+        '========================================',
+      );
+
+      console.log(
+        'TURF CREATED SUCCESSFULLY',
+      );
+
+      console.log(
+        'TURF ID:',
+        savedTurf._id,
+      );
+
+      console.log(
+        '========================================',
+      );
+
+
       return res.status(201).json({
         success: true,
 
         message:
-          'Turf submitted successfully and is waiting for admin approval.',
+          'Turf created successfully.',
 
-        turf: savedTurf,
+        turf:
+          savedTurf,
       });
     } catch (error) {
+      // =================================================
+      // ERROR
+      // =================================================
+
       console.error(
-        'Create turf error:',
+        '========================================',
+      );
+
+      console.error(
+        'CREATE TURF ERROR',
+      );
+
+      console.error(
         error,
       );
 
-      return res.status(400).json({
+      console.error(
+        '========================================',
+      );
+
+
+      return res.status(500).json({
         success: false,
-        error: 'Failed to create turf.',
-        details: getErrorMessage(error),
+
+        error:
+          'Failed to create turf.',
+
+        details:
+          getErrorMessage(
+            error,
+          ),
       });
     }
   },
