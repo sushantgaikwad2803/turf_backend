@@ -341,32 +341,18 @@ app.get('/api/health',
 // Includes active courts
 // ------------------------------------------
 
-app.get(
-  '/api/turfs',
+app.get('/api/turfs',
   async (_req: Request, res: Response) => {
     try {
-      // -------------------------------------------------
-      // GET ALL TURFS
-      // -------------------------------------------------
-
-      const turfs = await Turf.find({})
+      const turfs = await Turf.find({
+        status: 'active',
+      })
         .sort({ createdAt: -1 })
         .lean();
-
-      // -------------------------------------------------
-      // GET TURF IDS
-      // -------------------------------------------------
 
       const turfIds = turfs.map(
         (turf) => turf._id,
       );
-
-      // -------------------------------------------------
-      // GET COURTS
-      //
-      // Court model can still reference Turf.
-      // We are NOT removing courts from the system.
-      // -------------------------------------------------
 
       let courts: any[] = [];
 
@@ -375,14 +361,12 @@ app.get(
           turf: {
             $in: turfIds,
           },
+
+          status: 'active',
         })
           .sort({ createdAt: 1 })
           .lean();
       }
-
-      // -------------------------------------------------
-      // GROUP COURTS BY TURF
-      // -------------------------------------------------
 
       const courtsByTurf =
         new Map<string, any[]>();
@@ -391,23 +375,14 @@ app.get(
         const turfId =
           court.turf.toString();
 
-        if (
-          !courtsByTurf.has(turfId)
-        ) {
-          courtsByTurf.set(
-            turfId,
-            [],
-          );
+        if (!courtsByTurf.has(turfId)) {
+          courtsByTurf.set(turfId, []);
         }
 
         courtsByTurf
           .get(turfId)!
           .push(court);
       }
-
-      // -------------------------------------------------
-      // ADD COURTS TO EACH TURF
-      // -------------------------------------------------
 
       const turfList = turfs.map(
         (turf) => ({
@@ -420,15 +395,9 @@ app.get(
         }),
       );
 
-      // -------------------------------------------------
-      // RESPONSE
-      // -------------------------------------------------
-
       return res.status(200).json({
         success: true,
-
         count: turfList.length,
-
         turfs: turfList,
       });
     } catch (error) {
@@ -439,287 +408,224 @@ app.get(
 
       return res.status(500).json({
         success: false,
-
-        error:
-          'Failed to fetch turfs.',
-
-        details:
-          getErrorMessage(error),
+        error: 'Failed to fetch turfs',
+        details: getErrorMessage(error),
       });
     }
   },
 );
 
-
-// =====================================================
-// GET SINGLE TURF
-// GET /api/turfs/:id
-// =====================================================
-
-app.get('/api/turfs/:id',
-  async (
-    req: Request,
-    res: Response,
-  ) => {
-    try {
-      // -------------------------------------------------
-      // GET TURF ID
-      // -------------------------------------------------
-
-      const turfId = getParam(
-        req.params.id,
-      );
-
-      // -------------------------------------------------
-      // VALIDATE ID
-      // -------------------------------------------------
-
-      if (
-        !turfId ||
-        !isValidObjectId(turfId)
-      ) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            'Invalid Turf ID.',
-        });
-      }
-
-      // -------------------------------------------------
-      // FIND TURF
-      // -------------------------------------------------
-
-      const turf =
-        await Turf.findById(turfId)
-          .lean();
-
-      if (!turf) {
-        return res.status(404).json({
-          success: false,
-
-          error:
-            'Turf not found.',
-        });
-      }
-
-      // -------------------------------------------------
-      // GET COURTS
-      // -------------------------------------------------
-
-      const courts =
-        await Court.find({
-          turf: turf._id,
-        })
-          .sort({ createdAt: 1 })
-          .lean();
-
-      // -------------------------------------------------
-      // RESPONSE
-      // -------------------------------------------------
-
-      return res.status(200).json({
-        success: true,
-
-        turf: {
-          ...turf,
-
-          courts,
-        },
-      });
-    } catch (error) {
-      console.error(
-        'Fetch turf error:',
-        error,
-      );
-
-      return res.status(500).json({
-        success: false,
-
-        error:
-          'Failed to fetch turf.',
-
-        details:
-          getErrorMessage(error),
-      });
-    }
-  },
-);
 // ------------------------------------------
 // CREATE TURF
 // ------------------------------------------
-
-// ==========================================
-// CREATE TURF
-// POST /api/turfs
-// ==========================================
 
 app.post('/api/turfs',
-  async (
-    req: Request,
-    res: Response,
-  ) => {
+  async (req: Request, res: Response) => {
     try {
-      // ----------------------------------------
-      // REQUEST DATA
-      // ----------------------------------------
-
       const {
+        owner,
         name,
         description,
         address,
         city,
-        amenities,
+        location,
         images,
+        amenities,
+        sports,
+        openingTime,
+        closingTime,
+        operatingHours,
       } = req.body;
 
-      // ----------------------------------------
-      // VALIDATE NAME
-      // ----------------------------------------
-
+      // --------------------------------------------------
+      // 1. Validate required fields
+      // --------------------------------------------------
       if (
-        typeof name !== 'string' ||
-        !name.trim()
+        !owner ||
+        !name ||
+        !address ||
+        !city ||
+        !location ||
+        !location.coordinates
       ) {
         return res.status(400).json({
           success: false,
-
           error:
-            'Turf name is required.',
+            'Owner, name, address, city, and location coordinates are required.',
         });
       }
 
-      // ----------------------------------------
-      // VALIDATE ADDRESS
-      // ----------------------------------------
+      // --------------------------------------------------
+      // 2. Validate owner ID
+      // --------------------------------------------------
+      if (!isValidObjectId(owner)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid Owner ID.',
+        });
+      }
+
+      // --------------------------------------------------
+      // 3. Check owner account
+      // --------------------------------------------------
+      const ownerUser = await User.findById(owner).select(
+        '_id role',
+      );
+
+      if (!ownerUser) {
+        return res.status(404).json({
+          success: false,
+          error: 'Owner account not found.',
+        });
+      }
+
+      if (ownerUser.role !== 'owner') {
+        return res.status(403).json({
+          success: false,
+          error:
+            'Only owner accounts can create turfs.',
+        });
+      }
+
+      // --------------------------------------------------
+      // 4. Validate location coordinates
+      //    GeoJSON format:
+      //    [longitude, latitude]
+      // --------------------------------------------------
+      const coordinates = location.coordinates;
 
       if (
-        typeof address !== 'string' ||
-        !address.trim()
+        !Array.isArray(coordinates) ||
+        coordinates.length !== 2 ||
+        typeof coordinates[0] !== 'number' ||
+        typeof coordinates[1] !== 'number'
       ) {
         return res.status(400).json({
           success: false,
-
           error:
-            'Address is required.',
+            'Location must contain [longitude, latitude].',
         });
       }
 
-      // ----------------------------------------
-      // VALIDATE CITY
-      // ----------------------------------------
+      const longitude = Number(coordinates[0]);
+      const latitude = Number(coordinates[1]);
 
+      // --------------------------------------------------
+      // 5. Validate longitude / latitude ranges
+      // --------------------------------------------------
       if (
-        typeof city !== 'string' ||
-        !city.trim()
+        longitude < -180 ||
+        longitude > 180
       ) {
         return res.status(400).json({
           success: false,
-
-          error:
-            'City is required.',
+          error: 'Invalid longitude value.',
         });
       }
 
-      // ----------------------------------------
-      // VALIDATE DESCRIPTION
-      // ----------------------------------------
-
       if (
-        description !== undefined &&
-        description !== null &&
-        typeof description !== 'string'
+        latitude < -90 ||
+        latitude > 90
       ) {
         return res.status(400).json({
           success: false,
-
-          error:
-            'Description must be a string.',
+          error: 'Invalid latitude value.',
         });
       }
 
-      // ----------------------------------------
-      // VALIDATE AMENITIES
-      // ----------------------------------------
+      // --------------------------------------------------
+      // 6. Create turf
+      //
+      // IMPORTANT:
+      // New turf is ALWAYS:
+      //
+      // approvalStatus = pending
+      // status         = inactive
+      //
+      // Do NOT take these values from req.body.
+      // --------------------------------------------------
+      const newTurf = new Turf({
+        owner: toObjectId(owner),
 
-      if (
-        amenities !== undefined &&
-        !Array.isArray(amenities)
-      ) {
-        return res.status(400).json({
-          success: false,
+        name: String(name).trim(),
 
-          error:
-            'Amenities must be an array.',
-        });
-      }
+        description:
+          typeof description === 'string'
+            ? description.trim()
+            : '',
 
-      // ----------------------------------------
-      // VALIDATE IMAGES
-      // ----------------------------------------
+        address: String(address).trim(),
 
-      if (
-        images !== undefined &&
-        !Array.isArray(images)
-      ) {
-        return res.status(400).json({
-          success: false,
+        city: String(city).trim(),
 
-          error:
-            'Images must be an array.',
-        });
-      }
+        pricePerHour: 500,
 
-      // ----------------------------------------
-      // CREATE TURF
-      // ----------------------------------------
+        sports:
+          Array.isArray(sports) && sports.length > 0
+            ? sports
+            : ['cricket', 'football'],
 
-      const newTurf =
-        new Turf({
-          name:
-            name.trim(),
+        openingTime:
+          openingTime || '06:00 AM',
 
-          description:
-            typeof description ===
-            'string'
-              ? description.trim()
-              : '',
+        closingTime:
+          closingTime || '11:00 PM',
 
-          address:
-            address.trim(),
+        operatingHours:
+          Array.isArray(operatingHours)
+            ? operatingHours
+            : [],
 
-          city:
-            city.trim(),
+        location: {
+          type: 'Point',
+          coordinates: [
+            longitude,
+            latitude,
+          ],
+        },
 
-          amenities:
-            Array.isArray(
-              amenities,
-            )
-              ? amenities
-              : [],
+        images:
+          Array.isArray(images)
+            ? images
+            : [],
 
-          images:
-            Array.isArray(images)
-              ? images
-              : [],
-        });
+        amenities:
+          Array.isArray(amenities)
+            ? amenities
+            : [],
 
-      // ----------------------------------------
-      // SAVE
-      // ----------------------------------------
+        // ----------------------------------------------
+        // ADMIN APPROVAL FLOW
+        // ----------------------------------------------
 
-      const savedTurf =
-        await newTurf.save();
+        // Turf waits for admin approval
+        approvalStatus: 'pending',
 
-      // ----------------------------------------
-      // RESPONSE
-      // ----------------------------------------
+        // Turf must NOT be visible to customers
+        status: 'inactive',
 
+        // No rejection information initially
+        rejectionReason: '',
+
+        // No admin approval yet
+        approvedAt: null,
+
+        approvedBy: null,
+      });
+
+      // --------------------------------------------------
+      // 7. Save turf
+      // --------------------------------------------------
+      const savedTurf = await newTurf.save();
+
+      // --------------------------------------------------
+      // 8. Response
+      // --------------------------------------------------
       return res.status(201).json({
         success: true,
 
         message:
-          'Turf created successfully.',
+          'Turf submitted successfully and is waiting for admin approval.',
 
         turf: savedTurf,
       });
@@ -729,14 +635,10 @@ app.post('/api/turfs',
         error,
       );
 
-      return res.status(500).json({
+      return res.status(400).json({
         success: false,
-
-        error:
-          'Failed to create turf.',
-
-        details:
-          getErrorMessage(error),
+        error: 'Failed to create turf.',
+        details: getErrorMessage(error),
       });
     }
   },
@@ -748,205 +650,138 @@ app.post('/api/turfs',
 
 app.put(
   '/api/turfs/:id',
-  async (
-    req: Request,
-    res: Response,
-  ) => {
+  async (req: Request, res: Response) => {
     try {
-      // -------------------------------------------------
-      // GET TURF ID
-      // -------------------------------------------------
-
       const turfId = getParam(
         req.params.id,
       );
-
-      // -------------------------------------------------
-      // VALIDATE TURF ID
-      // -------------------------------------------------
 
       if (
         !turfId ||
         !isValidObjectId(turfId)
       ) {
         return res.status(400).json({
-          success: false,
-
-          error:
-            'Invalid Turf ID.',
+          error: 'Invalid Turf ID.',
         });
       }
 
-      // -------------------------------------------------
-      // ONLY THESE FIELDS ARE ALLOWED
-      // -------------------------------------------------
-
       const {
+        owner,
         name,
         description,
         address,
         city,
-        amenities,
+        location,
         images,
+        amenities,
+        sports,
+        openingTime,
+        closingTime,
+        operatingHours,
+        status,
       } = req.body;
 
-      // -------------------------------------------------
-      // FIND TURF
-      // -------------------------------------------------
-
       const existingTurf =
-        await Turf.findById(
-          turfId,
-        );
+        await Turf.findById(turfId);
 
       if (!existingTurf) {
         return res.status(404).json({
-          success: false,
-
-          error:
-            'Turf not found.',
+          error: 'Turf not found.',
         });
       }
 
-      // -------------------------------------------------
-      // UPDATE PAYLOAD
-      // -------------------------------------------------
-
-      const updatePayload:
-        Record<string, unknown> = {};
-
-      // -------------------------------------------------
-      // NAME
-      // -------------------------------------------------
-
-      if (name !== undefined) {
-        if (
-          typeof name !== 'string' ||
-          !name.trim()
-        ) {
-          return res.status(400).json({
-            success: false,
-
-            error:
-              'Turf name cannot be empty.',
-          });
-        }
-
-        updatePayload.name =
-          name.trim();
+      // If owner is supplied, ensure it matches
+      if (
+        owner &&
+        existingTurf.owner.toString() !==
+          String(owner)
+      ) {
+        return res.status(403).json({
+          error:
+            'You cannot update another owner\'s turf.',
+        });
       }
 
-      // -------------------------------------------------
-      // DESCRIPTION
-      // -------------------------------------------------
+      const updatePayload: Record<
+        string,
+        unknown
+      > = {};
+
+      if (name !== undefined) {
+        updatePayload.name =
+          String(name).trim();
+      }
 
       if (
         description !== undefined
       ) {
-        if (
-          typeof description !== 'string'
-        ) {
-          return res.status(400).json({
-            success: false,
-
-            error:
-              'Description must be a string.',
-          });
-        }
-
         updatePayload.description =
-          description.trim();
+          String(description).trim();
       }
-
-      // -------------------------------------------------
-      // ADDRESS
-      // -------------------------------------------------
 
       if (address !== undefined) {
-        if (
-          typeof address !== 'string' ||
-          !address.trim()
-        ) {
-          return res.status(400).json({
-            success: false,
-
-            error:
-              'Address cannot be empty.',
-          });
-        }
-
         updatePayload.address =
-          address.trim();
+          String(address).trim();
       }
-
-      // -------------------------------------------------
-      // CITY
-      // -------------------------------------------------
 
       if (city !== undefined) {
-        if (
-          typeof city !== 'string' ||
-          !city.trim()
-        ) {
-          return res.status(400).json({
-            success: false,
-
-            error:
-              'City cannot be empty.',
-          });
-        }
-
         updatePayload.city =
-          city.trim();
+          String(city).trim();
       }
 
-      // -------------------------------------------------
-      // AMENITIES
-      // -------------------------------------------------
-
-      if (
-        amenities !== undefined
-      ) {
-        if (
-          !Array.isArray(amenities)
-        ) {
-          return res.status(400).json({
-            success: false,
-
-            error:
-              'Amenities must be an array.',
-          });
-        }
-
-        updatePayload.amenities =
-          amenities;
+      if (location !== undefined) {
+        updatePayload.location =
+          location;
       }
 
-      // -------------------------------------------------
-      // IMAGES
-      // -------------------------------------------------
-
-      if (
-        images !== undefined
-      ) {
-        if (
-          !Array.isArray(images)
-        ) {
-          return res.status(400).json({
-            success: false,
-
-            error:
-              'Images must be an array.',
-          });
-        }
-
+      if (images !== undefined) {
         updatePayload.images =
-          images;
+          Array.isArray(images)
+            ? images
+            : [];
       }
 
-      // -------------------------------------------------
-      // UPDATE DATABASE
-      // -------------------------------------------------
+      if (amenities !== undefined) {
+        updatePayload.amenities =
+          Array.isArray(amenities)
+            ? amenities
+            : [];
+      }
+
+      if (sports !== undefined) {
+        updatePayload.sports =
+          Array.isArray(sports)
+            ? sports
+            : [];
+      }
+
+      if (
+        openingTime !== undefined
+      ) {
+        updatePayload.openingTime =
+          openingTime;
+      }
+
+      if (
+        closingTime !== undefined
+      ) {
+        updatePayload.closingTime =
+          closingTime;
+      }
+
+      if (
+        operatingHours !== undefined
+      ) {
+        updatePayload.operatingHours =
+          Array.isArray(operatingHours)
+            ? operatingHours
+            : [];
+      }
+
+      if (status !== undefined) {
+        updatePayload.status =
+          status;
+      }
 
       const updatedTurf =
         await Turf.findByIdAndUpdate(
@@ -958,16 +793,10 @@ app.put(
           },
         );
 
-      // -------------------------------------------------
-      // RESPONSE
-      // -------------------------------------------------
-
       return res.status(200).json({
         success: true,
-
         message:
           'Turf updated successfully.',
-
         turf: updatedTurf,
       });
     } catch (error) {
@@ -976,14 +805,10 @@ app.put(
         error,
       );
 
-      return res.status(500).json({
+      return res.status(400).json({
         success: false,
-
-        error:
-          'Failed to update turf.',
-
-        details:
-          getErrorMessage(error),
+        error: 'Failed to update turf.',
+        details: getErrorMessage(error),
       });
     }
   },
@@ -998,73 +823,55 @@ app.put(
 
 app.delete(
   '/api/turfs/:id',
-  async (
-    req: Request,
-    res: Response,
-  ) => {
+  async (req: Request, res: Response) => {
     try {
-      // -------------------------------------------------
-      // GET TURF ID
-      // -------------------------------------------------
-
       const turfId = getParam(
         req.params.id,
       );
-
-      // -------------------------------------------------
-      // VALIDATE TURF ID
-      // -------------------------------------------------
 
       if (
         !turfId ||
         !isValidObjectId(turfId)
       ) {
         return res.status(400).json({
-          success: false,
-
-          error:
-            'Invalid Turf ID.',
+          error: 'Invalid Turf ID.',
         });
       }
 
-      // -------------------------------------------------
-      // FIND TURF
-      // -------------------------------------------------
-
       const turf =
-        await Turf.findById(
-          turfId,
-        );
+        await Turf.findById(turfId);
 
       if (!turf) {
         return res.status(404).json({
-          success: false,
-
-          error:
-            'Turf not found.',
+          error: 'Turf not found.',
         });
       }
 
-      // -------------------------------------------------
-      // DELETE ASSOCIATED COURTS FIRST
-      // -------------------------------------------------
+      // Optional owner validation from request body
+      const requestedOwner =
+        req.body?.owner;
 
+      if (
+        requestedOwner &&
+        turf.owner.toString() !==
+          String(requestedOwner)
+      ) {
+        return res.status(403).json({
+          error:
+            'You cannot delete another owner\'s turf.',
+        });
+      }
+
+      // 1. Delete all courts
       const courtResult =
         await Court.deleteMany({
           turf: turf._id,
         });
 
-      // -------------------------------------------------
-      // DELETE TURF
-      // -------------------------------------------------
-
+      // 2. Delete turf
       await Turf.findByIdAndDelete(
         turf._id,
       );
-
-      // -------------------------------------------------
-      // RESPONSE
-      // -------------------------------------------------
 
       return res.status(200).json({
         success: true,
@@ -1072,8 +879,7 @@ app.delete(
         message:
           'Turf and all associated courts deleted successfully.',
 
-        deletedTurfId:
-          turf._id,
+        deletedTurfId: turf._id,
 
         deletedCourts:
           courtResult.deletedCount || 0,
@@ -1086,12 +892,8 @@ app.delete(
 
       return res.status(500).json({
         success: false,
-
-        error:
-          'Failed to delete turf.',
-
-        details:
-          getErrorMessage(error),
+        error: 'Failed to delete turf.',
+        details: getErrorMessage(error),
       });
     }
   },
@@ -1225,7 +1027,6 @@ app.get('/api/turfs/:turfId/courts',
         !isValidObjectId(turfId)
       ) {
         return res.status(400).json({
-          success: false,
           error: 'Invalid Turf ID.',
         });
       }
@@ -1236,7 +1037,6 @@ app.get('/api/turfs/:turfId/courts',
 
       if (!turf) {
         return res.status(404).json({
-          success: false,
           error: 'Turf not found.',
         });
       }
@@ -1260,7 +1060,6 @@ app.get('/api/turfs/:turfId/courts',
       );
 
       return res.status(500).json({
-        success: false,
         error: 'Failed to fetch courts.',
         details: getErrorMessage(error),
       });
@@ -1283,16 +1082,22 @@ function validateNightPricing(
   }
 
   if (
-    typeof nightPricePerHour !== 'number' ||
-    !Number.isFinite(nightPricePerHour) ||
+    typeof nightPricePerHour !==
+      'number' ||
+    !Number.isFinite(
+      nightPricePerHour,
+    ) ||
     nightPricePerHour < 0
   ) {
     return 'Night price per hour must be a non-negative number.';
   }
 
   if (
-    typeof nightStartHour !== 'number' ||
-    !Number.isInteger(nightStartHour) ||
+    typeof nightStartHour !==
+      'number' ||
+    !Number.isInteger(
+      nightStartHour,
+    ) ||
     nightStartHour < 0 ||
     nightStartHour > 23
   ) {
@@ -1300,8 +1105,11 @@ function validateNightPricing(
   }
 
   if (
-    typeof nightEndHour !== 'number' ||
-    !Number.isInteger(nightEndHour) ||
+    typeof nightEndHour !==
+      'number' ||
+    !Number.isInteger(
+      nightEndHour,
+    ) ||
     nightEndHour < 0 ||
     nightEndHour > 23
   ) {
@@ -1309,40 +1117,10 @@ function validateNightPricing(
   }
 
   if (
-    nightStartHour === nightEndHour
+    nightStartHour ===
+    nightEndHour
   ) {
     return 'Night start and end hours cannot be the same.';
-  }
-
-  return null;
-}
-
-// ------------------------------------------
-// FULL DAY DISCOUNT VALIDATION
-// ------------------------------------------
-
-function validateFullDayDiscount(
-  fullDayDiscountPercent: unknown,
-): string | null {
-  if (
-    typeof fullDayDiscountPercent !==
-      'number' ||
-    !Number.isFinite(
-      fullDayDiscountPercent,
-    )
-  ) {
-    return (
-      'Full day discount percentage must be a valid number.'
-    );
-  }
-
-  if (
-    fullDayDiscountPercent < 0 ||
-    fullDayDiscountPercent > 100
-  ) {
-    return (
-      'Full day discount percentage must be between 0 and 100.'
-    );
   }
 
   return null;
@@ -1353,32 +1131,19 @@ function validateFullDayDiscount(
 // ------------------------------------------
 
 app.post('/api/courts',
-  async (
-    req: Request,
-    res: Response,
-  ) => {
+  async (req: Request, res: Response) => {
     try {
       const {
         turf,
         name,
         sport,
         pricePerHour,
-
-        // Night pricing
         hasNightPricing = false,
         nightPricePerHour,
         nightStartHour,
         nightEndHour,
-
-        // Full day discount
-        fullDayDiscountPercent = 4,
-
         status,
       } = req.body;
-
-      // --------------------------------------
-      // REQUIRED FIELDS
-      // --------------------------------------
 
       if (
         !turf ||
@@ -1387,26 +1152,16 @@ app.post('/api/courts',
         pricePerHour == null
       ) {
         return res.status(400).json({
-          success: false,
           error:
             'Turf ID, name, sport, and price per hour are required.',
         });
       }
 
-      // --------------------------------------
-      // TURF ID VALIDATION
-      // --------------------------------------
-
       if (!isValidObjectId(turf)) {
         return res.status(400).json({
-          success: false,
           error: 'Invalid Turf ID.',
         });
       }
-
-      // --------------------------------------
-      // CHECK TURF
-      // --------------------------------------
 
       const parentTurf =
         await Turf.findById(turf)
@@ -1416,14 +1171,9 @@ app.post('/api/courts',
 
       if (!parentTurf) {
         return res.status(404).json({
-          success: false,
           error: 'Turf not found.',
         });
       }
-
-      // --------------------------------------
-      // NORMAL PRICE VALIDATION
-      // --------------------------------------
 
       if (
         typeof pricePerHour !==
@@ -1434,15 +1184,10 @@ app.post('/api/courts',
         pricePerHour < 0
       ) {
         return res.status(400).json({
-          success: false,
           error:
             'Price per hour must be a valid non-negative number.',
         });
       }
-
-      // --------------------------------------
-      // NIGHT PRICING VALIDATION
-      // --------------------------------------
 
       const nightPricingError =
         validateNightPricing(
@@ -1456,30 +1201,9 @@ app.post('/api/courts',
 
       if (nightPricingError) {
         return res.status(400).json({
-          success: false,
           error: nightPricingError,
         });
       }
-
-      // --------------------------------------
-      // FULL DAY DISCOUNT VALIDATION
-      // --------------------------------------
-
-      const fullDayDiscountError =
-        validateFullDayDiscount(
-          fullDayDiscountPercent,
-        );
-
-      if (fullDayDiscountError) {
-        return res.status(400).json({
-          success: false,
-          error: fullDayDiscountError,
-        });
-      }
-
-      // --------------------------------------
-      // CREATE COURT
-      // --------------------------------------
 
       const newCourt =
         new Court({
@@ -1495,7 +1219,6 @@ app.post('/api/courts',
 
           pricePerHour,
 
-          // Night pricing
           hasNightPricing:
             Boolean(
               hasNightPricing,
@@ -1509,10 +1232,6 @@ app.post('/api/courts',
               }
             : {}),
 
-          // Full day discount
-          fullDayDiscountPercent,
-
-          // Status
           status:
             status || 'active',
         });
@@ -1522,10 +1241,8 @@ app.post('/api/courts',
 
       return res.status(201).json({
         success: true,
-
         message:
           'Court created successfully.',
-
         court: savedCourt,
       });
     } catch (error) {
@@ -1536,12 +1253,9 @@ app.post('/api/courts',
 
       return res.status(400).json({
         success: false,
-
         error:
           'Failed to create court.',
-
-        details:
-          getErrorMessage(error),
+        details: getErrorMessage(error),
       });
     }
   },
@@ -1553,30 +1267,18 @@ app.post('/api/courts',
 
 app.put(
   '/api/courts/:id',
-  async (
-    req: Request,
-    res: Response,
-  ) => {
+  async (req: Request, res: Response) => {
     try {
-      const courtId =
-        getParam(
-          req.params.id,
-        );
-
-      // --------------------------------------
-      // COURT ID VALIDATION
-      // --------------------------------------
+      const courtId = getParam(
+        req.params.id,
+      );
 
       if (
         !courtId ||
-        !isValidObjectId(
-          courtId,
-        )
+        !isValidObjectId(courtId)
       ) {
         return res.status(400).json({
-          success: false,
-          error:
-            'Invalid Court ID.',
+          error: 'Invalid Court ID.',
         });
       }
 
@@ -1584,22 +1286,12 @@ app.put(
         name,
         sport,
         pricePerHour,
-
-        // Night pricing
         hasNightPricing = false,
         nightPricePerHour,
         nightStartHour,
         nightEndHour,
-
-        // Full day discount
-        fullDayDiscountPercent = 4,
-
         status,
       } = req.body;
-
-      // --------------------------------------
-      // REQUIRED FIELDS
-      // --------------------------------------
 
       if (
         !name ||
@@ -1607,15 +1299,10 @@ app.put(
         pricePerHour == null
       ) {
         return res.status(400).json({
-          success: false,
           error:
             'Name, sport, and price per hour are required.',
         });
       }
-
-      // --------------------------------------
-      // NORMAL PRICE VALIDATION
-      // --------------------------------------
 
       if (
         typeof pricePerHour !==
@@ -1626,15 +1313,10 @@ app.put(
         pricePerHour < 0
       ) {
         return res.status(400).json({
-          success: false,
           error:
             'Price per hour must be a valid non-negative number.',
         });
       }
-
-      // --------------------------------------
-      // NIGHT PRICING VALIDATION
-      // --------------------------------------
 
       const nightPricingError =
         validateNightPricing(
@@ -1648,31 +1330,9 @@ app.put(
 
       if (nightPricingError) {
         return res.status(400).json({
-          success: false,
           error: nightPricingError,
         });
       }
-
-      // --------------------------------------
-      // FULL DAY DISCOUNT VALIDATION
-      // --------------------------------------
-
-      const fullDayDiscountError =
-        validateFullDayDiscount(
-          fullDayDiscountPercent,
-        );
-
-      if (fullDayDiscountError) {
-        return res.status(400).json({
-          success: false,
-          error:
-            fullDayDiscountError,
-        });
-      }
-
-      // --------------------------------------
-      // FIND EXISTING COURT
-      // --------------------------------------
 
       const existingCourt =
         await Court.findById(
@@ -1681,18 +1341,14 @@ app.put(
 
       if (!existingCourt) {
         return res.status(404).json({
-          success: false,
-          error:
-            'Court not found.',
+          error: 'Court not found.',
         });
       }
 
-      // --------------------------------------
-      // UPDATE PAYLOAD
-      // --------------------------------------
-
-      const updatePayload:
-        Record<string, unknown> = {
+      const updatePayload: Record<
+        string,
+        unknown
+      > = {
         name: String(
           name,
         ).trim(),
@@ -1708,32 +1364,19 @@ app.put(
             hasNightPricing,
           ),
 
-        // IMPORTANT:
-        // Store the full day discount
-        fullDayDiscountPercent,
-
         status:
           status ||
           existingCourt.status,
       };
 
-      // --------------------------------------
-      // NIGHT PRICING
-      // --------------------------------------
-
-      if (
-        hasNightPricing
-      ) {
-        updatePayload
-          .nightPricePerHour =
+      if (hasNightPricing) {
+        updatePayload.nightPricePerHour =
           nightPricePerHour;
 
-        updatePayload
-          .nightStartHour =
+        updatePayload.nightStartHour =
           nightStartHour;
 
-        updatePayload
-          .nightEndHour =
+        updatePayload.nightEndHour =
           nightEndHour;
       } else {
         updatePayload.$unset = {
@@ -1742,10 +1385,6 @@ app.put(
           nightEndHour: 1,
         };
       }
-
-      // --------------------------------------
-      // UPDATE COURT
-      // --------------------------------------
 
       const updatedCourt =
         await Court.findByIdAndUpdate(
@@ -1759,12 +1398,9 @@ app.put(
 
       return res.status(200).json({
         success: true,
-
         message:
           'Court updated successfully.',
-
-        court:
-          updatedCourt,
+        court: updatedCourt,
       });
     } catch (error) {
       console.error(
@@ -1774,12 +1410,9 @@ app.put(
 
       return res.status(400).json({
         success: false,
-
         error:
           'Failed to update court.',
-
-        details:
-          getErrorMessage(error),
+        details: getErrorMessage(error),
       });
     }
   },
@@ -1791,26 +1424,18 @@ app.put(
 
 app.delete(
   '/api/courts/:id',
-  async (
-    req: Request,
-    res: Response,
-  ) => {
+  async (req: Request, res: Response) => {
     try {
-      const courtId =
-        getParam(
-          req.params.id,
-        );
+      const courtId = getParam(
+        req.params.id,
+      );
 
       if (
         !courtId ||
-        !isValidObjectId(
-          courtId,
-        )
+        !isValidObjectId(courtId)
       ) {
         return res.status(400).json({
-          success: false,
-          error:
-            'Invalid Court ID.',
+          error: 'Invalid Court ID.',
         });
       }
 
@@ -1821,9 +1446,7 @@ app.delete(
 
       if (!court) {
         return res.status(404).json({
-          success: false,
-          error:
-            'Court not found.',
+          error: 'Court not found.',
         });
       }
 
@@ -1833,12 +1456,9 @@ app.delete(
 
       return res.status(200).json({
         success: true,
-
         message:
           'Court deleted successfully.',
-
-        deletedCourtId:
-          courtId,
+        deletedCourtId: courtId,
       });
     } catch (error) {
       console.error(
@@ -1848,12 +1468,9 @@ app.delete(
 
       return res.status(500).json({
         success: false,
-
         error:
           'Failed to delete court.',
-
-        details:
-          getErrorMessage(error),
+        details: getErrorMessage(error),
       });
     }
   },
