@@ -419,7 +419,9 @@ app.get('/api/turfs',
 // CREATE TURF
 // ------------------------------------------
 
-app.post('/api/turfs',
+
+app.post(
+  '/api/turfs',
   async (req: Request, res: Response) => {
     try {
       const {
@@ -428,37 +430,32 @@ app.post('/api/turfs',
         description,
         address,
         city,
-        location,
         images,
         amenities,
-        sports,
-        openingTime,
-        closingTime,
-        operatingHours,
       } = req.body;
 
       // --------------------------------------------------
       // 1. Validate required fields
       // --------------------------------------------------
+
       if (
         !owner ||
         !name ||
         !address ||
-        !city ||
-        !location ||
-        !location.coordinates
+        !city
       ) {
         return res.status(400).json({
           success: false,
           error:
-            'Owner, name, address, city, and location coordinates are required.',
+            'Owner, name, address, and city are required.',
         });
       }
 
       // --------------------------------------------------
       // 2. Validate owner ID
       // --------------------------------------------------
-      if (!isValidObjectId(owner)) {
+
+      if (!isValidObjectId(String(owner))) {
         return res.status(400).json({
           success: false,
           error: 'Invalid Owner ID.',
@@ -468,9 +465,11 @@ app.post('/api/turfs',
       // --------------------------------------------------
       // 3. Check owner account
       // --------------------------------------------------
-      const ownerUser = await User.findById(owner).select(
-        '_id role',
-      );
+
+      const ownerUser =
+        await User.findById(owner).select(
+          '_id role',
+        );
 
       if (!ownerUser) {
         return res.status(404).json({
@@ -478,6 +477,10 @@ app.post('/api/turfs',
           error: 'Owner account not found.',
         });
       }
+
+      // --------------------------------------------------
+      // 4. Check owner role
+      // --------------------------------------------------
 
       if (ownerUser.role !== 'owner') {
         return res.status(403).json({
@@ -488,64 +491,23 @@ app.post('/api/turfs',
       }
 
       // --------------------------------------------------
-      // 4. Validate location coordinates
-      //    GeoJSON format:
-      //    [longitude, latitude]
-      // --------------------------------------------------
-      const coordinates = location.coordinates;
-
-      if (
-        !Array.isArray(coordinates) ||
-        coordinates.length !== 2 ||
-        typeof coordinates[0] !== 'number' ||
-        typeof coordinates[1] !== 'number'
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            'Location must contain [longitude, latitude].',
-        });
-      }
-
-      const longitude = Number(coordinates[0]);
-      const latitude = Number(coordinates[1]);
-
-      // --------------------------------------------------
-      // 5. Validate longitude / latitude ranges
-      // --------------------------------------------------
-      if (
-        longitude < -180 ||
-        longitude > 180
-      ) {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid longitude value.',
-        });
-      }
-
-      if (
-        latitude < -90 ||
-        latitude > 90
-      ) {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid latitude value.',
-        });
-      }
-
-      // --------------------------------------------------
-      // 6. Create turf
+      // 5. Create Turf
       //
       // IMPORTANT:
-      // New turf is ALWAYS:
+      // Turf does NOT contain:
       //
-      // approvalStatus = pending
-      // status         = inactive
+      // ❌ pricePerHour
+      // ❌ sports
+      // ❌ openingTime
+      // ❌ closingTime
+      // ❌ operatingHours
+      // ❌ location
       //
-      // Do NOT take these values from req.body.
+      // These belong elsewhere.
       // --------------------------------------------------
+
       const newTurf = new Turf({
-        owner: toObjectId(owner),
+        owner: toObjectId(String(owner)),
 
         name: String(name).trim(),
 
@@ -558,32 +520,6 @@ app.post('/api/turfs',
 
         city: String(city).trim(),
 
-        pricePerHour: 500,
-
-        sports:
-          Array.isArray(sports) && sports.length > 0
-            ? sports
-            : ['cricket', 'football'],
-
-        openingTime:
-          openingTime || '06:00 AM',
-
-        closingTime:
-          closingTime || '11:00 PM',
-
-        operatingHours:
-          Array.isArray(operatingHours)
-            ? operatingHours
-            : [],
-
-        location: {
-          type: 'Point',
-          coordinates: [
-            longitude,
-            latitude,
-          ],
-        },
-
         images:
           Array.isArray(images)
             ? images
@@ -594,33 +530,21 @@ app.post('/api/turfs',
             ? amenities
             : [],
 
-        // ----------------------------------------------
-        // ADMIN APPROVAL FLOW
-        // ----------------------------------------------
-
-        // Turf waits for admin approval
-        approvalStatus: 'pending',
-
-        // Turf must NOT be visible to customers
+        // New turf waits for admin approval
         status: 'inactive',
-
-        // No rejection information initially
-        rejectionReason: '',
-
-        // No admin approval yet
-        approvedAt: null,
-
-        approvedBy: null,
       });
 
       // --------------------------------------------------
-      // 7. Save turf
+      // 6. Save Turf
       // --------------------------------------------------
-      const savedTurf = await newTurf.save();
+
+      const savedTurf =
+        await newTurf.save();
 
       // --------------------------------------------------
-      // 8. Response
+      // 7. Response
       // --------------------------------------------------
+
       return res.status(201).json({
         success: true,
 
@@ -637,8 +561,12 @@ app.post('/api/turfs',
 
       return res.status(400).json({
         success: false,
-        error: 'Failed to create turf.',
-        details: getErrorMessage(error),
+
+        error:
+          'Failed to create turf.',
+
+        details:
+          getErrorMessage(error),
       });
     }
   },
@@ -650,20 +578,56 @@ app.post('/api/turfs',
 
 app.put(
   '/api/turfs/:id',
-  async (req: Request, res: Response) => {
+  async (
+    req: Request,
+    res: Response,
+  ) => {
     try {
+      // --------------------------------------------------
+      // 1. Get Turf ID
+      // --------------------------------------------------
+
       const turfId = getParam(
         req.params.id,
       );
+
+      // --------------------------------------------------
+      // 2. Validate Turf ID
+      // --------------------------------------------------
 
       if (
         !turfId ||
         !isValidObjectId(turfId)
       ) {
         return res.status(400).json({
+          success: false,
           error: 'Invalid Turf ID.',
         });
       }
+
+      // --------------------------------------------------
+      // 3. Read request body
+      //
+      // ONLY these fields are allowed:
+      //
+      // owner
+      // name
+      // description
+      // address
+      // city
+      // images
+      // amenities
+      // status
+      //
+      // Removed completely:
+      //
+      // ❌ pricePerHour
+      // ❌ sports
+      // ❌ openingTime
+      // ❌ closingTime
+      // ❌ operatingHours
+      // ❌ location
+      // --------------------------------------------------
 
       const {
         owner,
@@ -671,132 +635,224 @@ app.put(
         description,
         address,
         city,
-        location,
         images,
         amenities,
-        sports,
-        openingTime,
-        closingTime,
-        operatingHours,
         status,
       } = req.body;
+
+      // --------------------------------------------------
+      // 4. Find existing Turf
+      // --------------------------------------------------
 
       const existingTurf =
         await Turf.findById(turfId);
 
       if (!existingTurf) {
         return res.status(404).json({
+          success: false,
           error: 'Turf not found.',
         });
       }
 
-      // If owner is supplied, ensure it matches
-      if (
-        owner &&
-        existingTurf.owner.toString() !==
+      // --------------------------------------------------
+      // 5. Validate owner
+      // --------------------------------------------------
+
+      if (owner) {
+        if (
+          existingTurf.owner.toString() !==
           String(owner)
-      ) {
-        return res.status(403).json({
-          error:
-            'You cannot update another owner\'s turf.',
-        });
+        ) {
+          return res.status(403).json({
+            success: false,
+            error:
+              'You cannot update another owner\'s turf.',
+          });
+        }
       }
+
+      // --------------------------------------------------
+      // 6. Build update payload
+      // --------------------------------------------------
 
       const updatePayload: Record<
         string,
         unknown
       > = {};
 
+      // --------------------------------------------------
+      // NAME
+      // --------------------------------------------------
+
       if (name !== undefined) {
+        if (
+          typeof name !== 'string' ||
+          !name.trim()
+        ) {
+          return res.status(400).json({
+            success: false,
+            error:
+              'Turf name cannot be empty.',
+          });
+        }
+
         updatePayload.name =
-          String(name).trim();
+          name.trim();
       }
+
+      // --------------------------------------------------
+      // DESCRIPTION
+      // --------------------------------------------------
 
       if (
         description !== undefined
       ) {
         updatePayload.description =
-          String(description).trim();
+          typeof description === 'string'
+            ? description.trim()
+            : '';
       }
+
+      // --------------------------------------------------
+      // ADDRESS
+      // --------------------------------------------------
 
       if (address !== undefined) {
+        if (
+          typeof address !== 'string' ||
+          !address.trim()
+        ) {
+          return res.status(400).json({
+            success: false,
+            error:
+              'Address cannot be empty.',
+          });
+        }
+
         updatePayload.address =
-          String(address).trim();
+          address.trim();
       }
+
+      // --------------------------------------------------
+      // CITY
+      // --------------------------------------------------
 
       if (city !== undefined) {
+        if (
+          typeof city !== 'string' ||
+          !city.trim()
+        ) {
+          return res.status(400).json({
+            success: false,
+            error:
+              'City cannot be empty.',
+          });
+        }
+
         updatePayload.city =
-          String(city).trim();
+          city.trim();
       }
 
-      if (location !== undefined) {
-        updatePayload.location =
-          location;
-      }
+      // --------------------------------------------------
+      // IMAGES
+      // --------------------------------------------------
 
       if (images !== undefined) {
+        if (!Array.isArray(images)) {
+          return res.status(400).json({
+            success: false,
+            error:
+              'Images must be an array.',
+          });
+        }
+
         updatePayload.images =
-          Array.isArray(images)
-            ? images
-            : [];
+          images;
       }
 
-      if (amenities !== undefined) {
+      // --------------------------------------------------
+      // AMENITIES
+      // --------------------------------------------------
+
+      if (
+        amenities !== undefined
+      ) {
+        if (!Array.isArray(amenities)) {
+          return res.status(400).json({
+            success: false,
+            error:
+              'Amenities must be an array.',
+          });
+        }
+
         updatePayload.amenities =
-          Array.isArray(amenities)
-            ? amenities
-            : [];
+          amenities;
       }
 
-      if (sports !== undefined) {
-        updatePayload.sports =
-          Array.isArray(sports)
-            ? sports
-            : [];
-      }
-
-      if (
-        openingTime !== undefined
-      ) {
-        updatePayload.openingTime =
-          openingTime;
-      }
-
-      if (
-        closingTime !== undefined
-      ) {
-        updatePayload.closingTime =
-          closingTime;
-      }
-
-      if (
-        operatingHours !== undefined
-      ) {
-        updatePayload.operatingHours =
-          Array.isArray(operatingHours)
-            ? operatingHours
-            : [];
-      }
+      // --------------------------------------------------
+      // STATUS
+      // --------------------------------------------------
 
       if (status !== undefined) {
+        const allowedStatuses = [
+          'active',
+          'inactive',
+          'maintenance',
+        ];
+
+        if (
+          !allowedStatuses.includes(
+            status,
+          )
+        ) {
+          return res.status(400).json({
+            success: false,
+            error:
+              'Invalid status. Use active, inactive or maintenance.',
+          });
+        }
+
         updatePayload.status =
           status;
       }
 
+      // --------------------------------------------------
+      // 7. Update Turf
+      // --------------------------------------------------
+
       const updatedTurf =
         await Turf.findByIdAndUpdate(
           turfId,
-          updatePayload,
+          {
+            $set: updatePayload,
+          },
           {
             new: true,
             runValidators: true,
           },
         );
 
+      // --------------------------------------------------
+      // 8. Check update result
+      // --------------------------------------------------
+
+      if (!updatedTurf) {
+        return res.status(404).json({
+          success: false,
+          error: 'Turf not found.',
+        });
+      }
+
+      // --------------------------------------------------
+      // 9. Response
+      // --------------------------------------------------
+
       return res.status(200).json({
         success: true,
+
         message:
           'Turf updated successfully.',
+
         turf: updatedTurf,
       });
     } catch (error) {
@@ -807,8 +863,12 @@ app.put(
 
       return res.status(400).json({
         success: false,
-        error: 'Failed to update turf.',
-        details: getErrorMessage(error),
+
+        error:
+          'Failed to update turf.',
+
+        details:
+          getErrorMessage(error),
       });
     }
   },
