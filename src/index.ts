@@ -510,20 +510,21 @@ app.post(
           'Turf submitted successfully and is waiting for admin approval.',
         turf: savedTurf,
       });
-    } catch (error) {
-      console.error(
-        'CREATE TURF ERROR:',
-        error,
-      );
+    } catch (error: any) {
+  console.error('========================================');
+  console.error('CREATE TURF BACKEND ERROR:', error);
+  console.error('ERROR MESSAGE:', error?.message);
+  console.error('ERROR NAME:', error?.name);
+  console.error('ERROR STACK:', error?.stack);
+  console.error('========================================');
 
-      return res.status(400).json({
-        success: false,
-        error:
-          'Failed to create turf.',
-        details:
-          getErrorMessage(error),
-      });
-    }
+  return res.status(400).json({
+    success: false,
+    error: 'Failed to create turf.',
+    details: error?.message || 'Unknown server error',
+    name: error?.name || 'UnknownError',
+  });
+}
   },
 );
 // ------------------------------------------
