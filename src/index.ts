@@ -432,8 +432,7 @@ app.get(
 // POST /api/turfs
 // =====================================================
 
-app.post(
-  '/api/turfs',
+app.post('/api/turfs',
   async (
     req: Request,
     res: Response,
@@ -460,20 +459,62 @@ app.post(
         '========================================',
       );
 
-
       // =================================================
       // GET DATA FROM REQUEST
       // =================================================
 
       const {
+        owner,
         name,
         description,
         address,
         city,
         amenities,
         images,
+        status,
       } = req.body;
 
+      // =================================================
+      // VALIDATE OWNER
+      // =================================================
+
+      if (!owner) {
+        return res.status(400).json({
+          success: false,
+          error: 'Owner is required.',
+        });
+      }
+
+      // =================================================
+      // VALIDATE OWNER ID
+      // =================================================
+
+      if (
+        !isValidObjectId(
+          String(owner),
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid owner ID.',
+        });
+      }
+
+      // =================================================
+      // CHECK OWNER EXISTS
+      // =================================================
+
+      const ownerExists =
+        await User.findById(
+          owner,
+        ).select('_id');
+
+      if (!ownerExists) {
+        return res.status(404).json({
+          success: false,
+          error: 'Owner user not found.',
+        });
+      }
 
       // =================================================
       // VALIDATE NAME
@@ -489,7 +530,6 @@ app.post(
         });
       }
 
-
       // =================================================
       // VALIDATE ADDRESS
       // =================================================
@@ -504,7 +544,6 @@ app.post(
         });
       }
 
-
       // =================================================
       // VALIDATE CITY
       // =================================================
@@ -518,7 +557,6 @@ app.post(
           error: 'Turf city is required.',
         });
       }
-
 
       // =================================================
       // VALIDATE DESCRIPTION
@@ -536,7 +574,6 @@ app.post(
         });
       }
 
-
       // =================================================
       // VALIDATE AMENITIES
       // =================================================
@@ -551,7 +588,6 @@ app.post(
             'Amenities must be an array.',
         });
       }
-
 
       // =================================================
       // VALIDATE IMAGES
@@ -568,7 +604,6 @@ app.post(
         });
       }
 
-
       // =================================================
       // CLEAN AMENITIES
       // =================================================
@@ -584,45 +619,34 @@ app.post(
                   'string',
               )
               .map(
-                (
-                  item,
-                ) =>
+                (item) =>
                   item.trim(),
               )
-              .filter(
-                (
-                  item,
-                ) =>
-                  item.length > 0,
-              )
+              .filter(Boolean)
           : [];
-
 
       // =================================================
       // CLEAN IMAGES
       // =================================================
 
-      const cleanImages: {
-        url: string;
-        isPrimary: boolean;
-      }[] =
+      const cleanImages =
         Array.isArray(images)
           ? images
               .filter(
-                (
-                  image,
-                ) =>
-                  image !== null &&
+                (image) =>
+                  image &&
                   typeof image ===
                     'object' &&
                   typeof image.url ===
                     'string' &&
-                  image.url.trim()
+                  image.url
+                    .trim()
                     .length > 0,
               )
               .map(
                 (
                   image,
+                  index,
                 ) => ({
                   url:
                     image.url.trim(),
@@ -630,70 +654,40 @@ app.post(
                   isPrimary:
                     Boolean(
                       image.isPrimary,
-                    ),
+                    ) ||
+                    index === 0,
                 }),
               )
           : [];
 
+      // =================================================
+      // VALIDATE STATUS
+      // =================================================
+
+      const allowedStatuses = [
+        'active',
+        'inactive',
+        'maintenance',
+      ];
+
+      const finalStatus =
+        status &&
+        allowedStatuses.includes(
+          String(status),
+        )
+          ? String(status)
+          : 'active';
 
       // =================================================
-      // HANDLE PRIMARY IMAGE
-      // =================================================
-
-      if (
-        cleanImages.length > 0
-      ) {
-        const primaryIndex =
-          cleanImages.findIndex(
-            (
-              image,
-            ) =>
-              image.isPrimary ===
-              true,
-          );
-
-
-        // -----------------------------------------------
-        // NO PRIMARY IMAGE
-        // -----------------------------------------------
-
-        if (
-          primaryIndex === -1
-        ) {
-          const firstImage =
-            cleanImages.at(0);
-
-          if (firstImage) {
-            firstImage.isPrimary =
-              true;
-          }
-        }
-
-
-        // -----------------------------------------------
-        // PRIMARY IMAGE EXISTS
-        // -----------------------------------------------
-
-        else {
-          cleanImages.forEach(
-            (
-              image,
-              index,
-            ) => {
-              image.isPrimary =
-                index ===
-                primaryIndex;
-            },
-          );
-        }
-      }
-
-
-      // =================================================
-      // CREATE TURF DATA
+      // TURF DATA
       // =================================================
 
       const turfData = {
+        owner:
+          new mongoose.Types.ObjectId(
+            String(owner),
+          ),
+
         name:
           name.trim(),
 
@@ -714,11 +708,13 @@ app.post(
 
         images:
           cleanImages,
+
+        status:
+          finalStatus,
       };
 
-
       // =================================================
-      // LOG DATA BEFORE SAVE
+      // LOG DATA
       // =================================================
 
       console.log(
@@ -730,7 +726,6 @@ app.post(
         ),
       );
 
-
       // =================================================
       // CREATE TURF
       // =================================================
@@ -740,7 +735,6 @@ app.post(
           turfData,
         );
 
-
       // =================================================
       // SAVE TURF
       // =================================================
@@ -748,9 +742,8 @@ app.post(
       const savedTurf =
         await newTurf.save();
 
-
       // =================================================
-      // SUCCESS
+      // SUCCESS LOG
       // =================================================
 
       console.log(
@@ -767,9 +760,17 @@ app.post(
       );
 
       console.log(
+        'OWNER ID:',
+        savedTurf.owner,
+      );
+
+      console.log(
         '========================================',
       );
 
+      // =================================================
+      // RESPONSE
+      // =================================================
 
       return res.status(201).json({
         success: true,
@@ -780,10 +781,8 @@ app.post(
         turf:
           savedTurf,
       });
+
     } catch (error) {
-      // =================================================
-      // ERROR
-      // =================================================
 
       console.error(
         '========================================',
@@ -800,7 +799,6 @@ app.post(
       console.error(
         '========================================',
       );
-
 
       return res.status(500).json({
         success: false,

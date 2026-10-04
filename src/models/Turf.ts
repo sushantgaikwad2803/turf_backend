@@ -1,23 +1,39 @@
-import { Schema, model, Document } from 'mongoose';
+import {
+  Schema,
+  model,
+  Document,
+  Types,
+} from 'mongoose';
 
 // =====================================================
 // TURF INTERFACE
 // =====================================================
 
 export interface ITurf extends Document {
+  owner: Types.ObjectId;
+
   name: string;
+
   description: string;
+
   address: string;
+
   city: string;
 
   amenities: string[];
 
-  images: {
+  images: Array<{
     url: string;
     isPrimary: boolean;
-  }[];
+  }>;
+
+  status:
+    | 'active'
+    | 'inactive'
+    | 'maintenance';
 
   createdAt: Date;
+
   updatedAt: Date;
 }
 
@@ -28,6 +44,17 @@ export interface ITurf extends Document {
 const TurfSchema = new Schema<ITurf>(
   {
     // =================================================
+    // OWNER
+    // =================================================
+
+    owner: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
+
+    // =================================================
     // TURF NAME
     // =================================================
 
@@ -35,6 +62,7 @@ const TurfSchema = new Schema<ITurf>(
       type: String,
       required: true,
       trim: true,
+      maxlength: 150,
     },
 
     // =================================================
@@ -95,7 +123,25 @@ const TurfSchema = new Schema<ITurf>(
         },
       },
     ],
+
+    // =================================================
+    // STATUS
+    // =================================================
+
+    status: {
+      type: String,
+      enum: [
+        'active',
+        'inactive',
+        'maintenance',
+      ],
+      default: 'active',
+    },
   },
+
+  // ===================================================
+  // TIMESTAMPS
+  // ===================================================
 
   {
     timestamps: true,
