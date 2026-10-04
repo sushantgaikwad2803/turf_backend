@@ -336,6 +336,10 @@ app.get('/api/health',
 // TURF ROUTES
 // ==========================================
 
+// ==========================================
+// TURF ROUTES
+// ==========================================
+
 // =====================================================
 // GET ALL TURFS
 // GET /api/turfs
@@ -368,13 +372,14 @@ app.get(
 
       return res.status(500).json({
         success: false,
-        error: 'Failed to fetch turfs.',
-        details: getErrorMessage(error),
+        error:
+          'Failed to fetch turfs.',
+        details:
+          getErrorMessage(error),
       });
     }
   },
 );
-
 
 // =====================================================
 // GET SINGLE TURF
@@ -388,22 +393,31 @@ app.get(
     res: Response,
   ) => {
     try {
-      const { id } = req.params;
+      const turfId = getParam(
+        req.params.id,
+      );
 
-      if (!id) {
+      if (
+        !turfId ||
+        !isValidObjectId(turfId)
+      ) {
         return res.status(400).json({
           success: false,
-          error: 'Turf ID is required.',
+          error:
+            'Valid Turf ID is required.',
         });
       }
 
       const turf =
-        await Turf.findById(id).lean();
+        await Turf.findById(
+          turfId,
+        ).lean();
 
       if (!turf) {
         return res.status(404).json({
           success: false,
-          error: 'Turf not found.',
+          error:
+            'Turf not found.',
         });
       }
 
@@ -419,20 +433,22 @@ app.get(
 
       return res.status(500).json({
         success: false,
-        error: 'Failed to fetch turf.',
-        details: getErrorMessage(error),
+        error:
+          'Failed to fetch turf.',
+        details:
+          getErrorMessage(error),
       });
     }
   },
 );
-
 
 // =====================================================
 // CREATE TURF
 // POST /api/turfs
 // =====================================================
 
-app.post('/api/turfs',
+app.post(
+  '/api/turfs',
   async (
     req: Request,
     res: Response,
@@ -459,9 +475,9 @@ app.post('/api/turfs',
         '========================================',
       );
 
-      // =================================================
-      // GET DATA FROM REQUEST
-      // =================================================
+      // ========================================
+      // READ ONLY NEW TURF FIELDS
+      // ========================================
 
       const {
         owner,
@@ -474,20 +490,17 @@ app.post('/api/turfs',
         status,
       } = req.body;
 
-      // =================================================
-      // VALIDATE OWNER
-      // =================================================
+      // ========================================
+      // OWNER VALIDATION
+      // ========================================
 
       if (!owner) {
         return res.status(400).json({
           success: false,
-          error: 'Owner is required.',
+          error:
+            'Owner is required.',
         });
       }
-
-      // =================================================
-      // VALIDATE OWNER ID
-      // =================================================
 
       if (
         !isValidObjectId(
@@ -496,76 +509,101 @@ app.post('/api/turfs',
       ) {
         return res.status(400).json({
           success: false,
-          error: 'Invalid owner ID.',
+          error:
+            'Invalid owner ID.',
         });
       }
 
-      // =================================================
+      // ========================================
       // CHECK OWNER EXISTS
-      // =================================================
+      // ========================================
 
       const ownerExists =
         await User.findById(
           owner,
-        ).select('_id');
+        ).select('_id role');
 
       if (!ownerExists) {
         return res.status(404).json({
           success: false,
-          error: 'Owner user not found.',
+          error:
+            'Owner user not found.',
         });
       }
 
-      // =================================================
-      // VALIDATE NAME
-      // =================================================
+      // ========================================
+      // CHECK OWNER ROLE
+      // ========================================
 
       if (
-        typeof name !== 'string' ||
+        ownerExists.role !==
+        'owner'
+      ) {
+        return res.status(403).json({
+          success: false,
+          error:
+            'Only owner accounts can create turfs.',
+        });
+      }
+
+      // ========================================
+      // NAME VALIDATION
+      // ========================================
+
+      if (
+        typeof name !==
+          'string' ||
         name.trim().length === 0
       ) {
         return res.status(400).json({
           success: false,
-          error: 'Turf name is required.',
+          error:
+            'Turf name is required.',
         });
       }
 
-      // =================================================
-      // VALIDATE ADDRESS
-      // =================================================
+      // ========================================
+      // ADDRESS VALIDATION
+      // ========================================
 
       if (
-        typeof address !== 'string' ||
+        typeof address !==
+          'string' ||
         address.trim().length === 0
       ) {
         return res.status(400).json({
           success: false,
-          error: 'Turf address is required.',
+          error:
+            'Turf address is required.',
         });
       }
 
-      // =================================================
-      // VALIDATE CITY
-      // =================================================
+      // ========================================
+      // CITY VALIDATION
+      // ========================================
 
       if (
-        typeof city !== 'string' ||
+        typeof city !==
+          'string' ||
         city.trim().length === 0
       ) {
         return res.status(400).json({
           success: false,
-          error: 'Turf city is required.',
+          error:
+            'Turf city is required.',
         });
       }
 
-      // =================================================
-      // VALIDATE DESCRIPTION
-      // =================================================
+      // ========================================
+      // DESCRIPTION VALIDATION
+      // ========================================
 
       if (
-        description !== undefined &&
+        description !==
+          undefined &&
         description !== null &&
-        typeof description !== 'string'
+        typeof description !==
+          'string'
       ) {
         return res.status(400).json({
           success: false,
@@ -574,13 +612,16 @@ app.post('/api/turfs',
         });
       }
 
-      // =================================================
-      // VALIDATE AMENITIES
-      // =================================================
+      // ========================================
+      // AMENITIES VALIDATION
+      // ========================================
 
       if (
-        amenities !== undefined &&
-        !Array.isArray(amenities)
+        amenities !==
+          undefined &&
+        !Array.isArray(
+          amenities,
+        )
       ) {
         return res.status(400).json({
           success: false,
@@ -589,12 +630,13 @@ app.post('/api/turfs',
         });
       }
 
-      // =================================================
-      // VALIDATE IMAGES
-      // =================================================
+      // ========================================
+      // IMAGES VALIDATION
+      // ========================================
 
       if (
-        images !== undefined &&
+        images !==
+          undefined &&
         !Array.isArray(images)
       ) {
         return res.status(400).json({
@@ -604,9 +646,9 @@ app.post('/api/turfs',
         });
       }
 
-      // =================================================
+      // ========================================
       // CLEAN AMENITIES
-      // =================================================
+      // ========================================
 
       const cleanAmenities: string[] =
         Array.isArray(amenities)
@@ -625,11 +667,14 @@ app.post('/api/turfs',
               .filter(Boolean)
           : [];
 
-      // =================================================
+      // ========================================
       // CLEAN IMAGES
-      // =================================================
+      // ========================================
 
-      const cleanImages =
+      const cleanImages: Array<{
+        url: string;
+        isPrimary: boolean;
+      }> =
         Array.isArray(images)
           ? images
               .filter(
@@ -649,7 +694,8 @@ app.post('/api/turfs',
                   index,
                 ) => ({
                   url:
-                    image.url.trim(),
+                    image.url
+                      .trim(),
 
                   isPrimary:
                     Boolean(
@@ -660,31 +706,55 @@ app.post('/api/turfs',
               )
           : [];
 
-      // =================================================
-      // VALIDATE STATUS
-      // =================================================
+      // ========================================
+      // STATUS VALIDATION
+      // ========================================
 
-      const allowedStatuses = [
-        'active',
-        'inactive',
-        'maintenance',
-      ];
+      const allowedStatuses =
+        [
+          'active',
+          'inactive',
+          'maintenance',
+        ] as const;
 
-      const finalStatus =
-        status &&
+      type TurfStatus =
+        (typeof allowedStatuses)[number];
+
+      let finalStatus: TurfStatus =
+        'active';
+
+      if (
+        status !==
+          undefined &&
         allowedStatuses.includes(
-          String(status),
+          String(
+            status,
+          ) as TurfStatus,
         )
-          ? String(status)
-          : 'active';
+      ) {
+        finalStatus =
+          String(
+            status,
+          ) as TurfStatus;
+      }
 
-      // =================================================
+      // ========================================
       // TURF DATA
-      // =================================================
+      // ========================================
+      //
+      // IMPORTANT:
+      // No pricePerHour
+      // No sports
+      // No openingTime
+      // No closingTime
+      // No operatingHours
+      // No location
+      //
+      // ========================================
 
       const turfData = {
         owner:
-          new mongoose.Types.ObjectId(
+          toObjectId(
             String(owner),
           ),
 
@@ -713,10 +783,6 @@ app.post('/api/turfs',
           finalStatus,
       };
 
-      // =================================================
-      // LOG DATA
-      // =================================================
-
       console.log(
         'TURF DATA TO SAVE:',
         JSON.stringify(
@@ -726,29 +792,25 @@ app.post('/api/turfs',
         ),
       );
 
-      // =================================================
+      // ========================================
       // CREATE TURF
-      // =================================================
+      // ========================================
 
       const newTurf =
         new Turf(
           turfData,
         );
 
-      // =================================================
+      // ========================================
       // SAVE TURF
-      // =================================================
+      // ========================================
 
       const savedTurf =
         await newTurf.save();
 
-      // =================================================
-      // SUCCESS LOG
-      // =================================================
-
-      console.log(
-        '========================================',
-      );
+      // ========================================
+      // SUCCESS
+      // ========================================
 
       console.log(
         'TURF CREATED SUCCESSFULLY',
@@ -764,14 +826,6 @@ app.post('/api/turfs',
         savedTurf.owner,
       );
 
-      console.log(
-        '========================================',
-      );
-
-      // =================================================
-      // RESPONSE
-      // =================================================
-
       return res.status(201).json({
         success: true,
 
@@ -781,23 +835,10 @@ app.post('/api/turfs',
         turf:
           savedTurf,
       });
-
     } catch (error) {
-
       console.error(
-        '========================================',
-      );
-
-      console.error(
-        'CREATE TURF ERROR',
-      );
-
-      console.error(
+        'CREATE TURF ERROR:',
         error,
-      );
-
-      console.error(
-        '========================================',
       );
 
       return res.status(500).json({
@@ -807,34 +848,49 @@ app.post('/api/turfs',
           'Failed to create turf.',
 
         details:
-          getErrorMessage(
-            error,
-          ),
+          getErrorMessage(error),
       });
     }
   },
 );
 
-// ------------------------------------------
+// =====================================================
 // UPDATE TURF
-// ------------------------------------------
+// PUT /api/turfs/:id
+// =====================================================
 
 app.put(
   '/api/turfs/:id',
-  async (req: Request, res: Response) => {
+  async (
+    req: Request,
+    res: Response,
+  ) => {
     try {
-      const turfId = getParam(
-        req.params.id,
-      );
+      const turfId =
+        getParam(
+          req.params.id,
+        );
+
+      // ========================================
+      // TURF ID VALIDATION
+      // ========================================
 
       if (
         !turfId ||
-        !isValidObjectId(turfId)
+        !isValidObjectId(
+          turfId,
+        )
       ) {
         return res.status(400).json({
-          error: 'Invalid Turf ID.',
+          success: false,
+          error:
+            'Invalid Turf ID.',
         });
       }
+
+      // ========================================
+      // READ NEW TURF FIELDS ONLY
+      // ========================================
 
       const {
         owner,
@@ -842,207 +898,488 @@ app.put(
         description,
         address,
         city,
-        location,
-        images,
         amenities,
-        sports,
-        openingTime,
-        closingTime,
-        operatingHours,
+        images,
         status,
       } = req.body;
 
+      // ========================================
+      // FIND TURF
+      // ========================================
+
       const existingTurf =
-        await Turf.findById(turfId);
+        await Turf.findById(
+          turfId,
+        );
 
       if (!existingTurf) {
         return res.status(404).json({
-          error: 'Turf not found.',
-        });
-      }
-
-      // If owner is supplied, ensure it matches
-      if (
-        owner &&
-        existingTurf.owner.toString() !==
-          String(owner)
-      ) {
-        return res.status(403).json({
+          success: false,
           error:
-            'You cannot update another owner\'s turf.',
+            'Turf not found.',
         });
       }
 
-      const updatePayload: Record<
-        string,
-        unknown
-      > = {};
+      // ========================================
+      // OWNER VALIDATION
+      // ========================================
 
-      if (name !== undefined) {
+      if (owner !== undefined) {
+        if (
+          !isValidObjectId(
+            String(owner),
+          )
+        ) {
+          return res.status(400).json({
+            success: false,
+            error:
+              'Invalid owner ID.',
+          });
+        }
+
+        if (
+          existingTurf.owner
+            .toString() !==
+          String(owner)
+        ) {
+          return res.status(403).json({
+            success: false,
+            error:
+              'You cannot update another owner\'s turf.',
+          });
+        }
+      }
+
+      // ========================================
+      // UPDATE PAYLOAD
+      // ========================================
+
+      const updatePayload:
+        Record<
+          string,
+          unknown
+        > = {};
+
+      // ========================================
+      // NAME
+      // ========================================
+
+      if (
+        name !==
+        undefined
+      ) {
+        if (
+          typeof name !==
+            'string' ||
+          name.trim().length ===
+            0
+        ) {
+          return res.status(400).json({
+            success: false,
+            error:
+              'Turf name cannot be empty.',
+          });
+        }
+
         updatePayload.name =
-          String(name).trim();
+          name.trim();
       }
 
+      // ========================================
+      // DESCRIPTION
+      // ========================================
+
       if (
-        description !== undefined
+        description !==
+        undefined
       ) {
+        if (
+          description !==
+            null &&
+          typeof description !==
+            'string'
+        ) {
+          return res.status(400).json({
+            success: false,
+            error:
+              'Description must be a string.',
+          });
+        }
+
         updatePayload.description =
-          String(description).trim();
+          typeof description ===
+          'string'
+            ? description.trim()
+            : '';
       }
 
-      if (address !== undefined) {
+      // ========================================
+      // ADDRESS
+      // ========================================
+
+      if (
+        address !==
+        undefined
+      ) {
+        if (
+          typeof address !==
+            'string' ||
+          address.trim().length ===
+            0
+        ) {
+          return res.status(400).json({
+            success: false,
+            error:
+              'Turf address cannot be empty.',
+          });
+        }
+
         updatePayload.address =
-          String(address).trim();
+          address.trim();
       }
 
-      if (city !== undefined) {
+      // ========================================
+      // CITY
+      // ========================================
+
+      if (
+        city !==
+        undefined
+      ) {
+        if (
+          typeof city !==
+            'string' ||
+          city.trim().length ===
+            0
+        ) {
+          return res.status(400).json({
+            success: false,
+            error:
+              'Turf city cannot be empty.',
+          });
+        }
+
         updatePayload.city =
-          String(city).trim();
+          city.trim();
       }
 
-      if (location !== undefined) {
-        updatePayload.location =
-          location;
-      }
+      // ========================================
+      // AMENITIES
+      // ========================================
 
-      if (images !== undefined) {
-        updatePayload.images =
-          Array.isArray(images)
-            ? images
-            : [];
-      }
+      if (
+        amenities !==
+        undefined
+      ) {
+        if (
+          !Array.isArray(
+            amenities,
+          )
+        ) {
+          return res.status(400).json({
+            success: false,
+            error:
+              'Amenities must be an array.',
+          });
+        }
 
-      if (amenities !== undefined) {
+        const cleanAmenities =
+          amenities
+            .filter(
+              (
+                item,
+              ): item is string =>
+                typeof item ===
+                'string',
+            )
+            .map(
+              (item) =>
+                item.trim(),
+            )
+            .filter(Boolean);
+
         updatePayload.amenities =
-          Array.isArray(amenities)
-            ? amenities
-            : [];
+          cleanAmenities;
       }
 
-      if (sports !== undefined) {
-        updatePayload.sports =
-          Array.isArray(sports)
-            ? sports
-            : [];
-      }
+      // ========================================
+      // IMAGES
+      // ========================================
 
       if (
-        openingTime !== undefined
+        images !==
+        undefined
       ) {
-        updatePayload.openingTime =
-          openingTime;
+        if (
+          !Array.isArray(
+            images,
+          )
+        ) {
+          return res.status(400).json({
+            success: false,
+            error:
+              'Images must be an array.',
+          });
+        }
+
+        const cleanImages =
+          images
+            .filter(
+              (image) =>
+                image &&
+                typeof image ===
+                  'object' &&
+                typeof image.url ===
+                  'string' &&
+                image.url
+                  .trim()
+                  .length > 0,
+            )
+            .map(
+              (
+                image,
+                index,
+              ) => ({
+                url:
+                  image.url
+                    .trim(),
+
+                isPrimary:
+                  Boolean(
+                    image.isPrimary,
+                  ) ||
+                  index === 0,
+              }),
+            );
+
+        updatePayload.images =
+          cleanImages;
       }
+
+      // ========================================
+      // STATUS
+      // ========================================
 
       if (
-        closingTime !== undefined
+        status !==
+        undefined
       ) {
-        updatePayload.closingTime =
-          closingTime;
-      }
+        const allowedStatuses =
+          [
+            'active',
+            'inactive',
+            'maintenance',
+          ] as const;
 
-      if (
-        operatingHours !== undefined
-      ) {
-        updatePayload.operatingHours =
-          Array.isArray(operatingHours)
-            ? operatingHours
-            : [];
-      }
+        if (
+          !allowedStatuses.includes(
+            String(
+              status,
+            ) as
+              (typeof allowedStatuses)[number],
+          )
+        ) {
+          return res.status(400).json({
+            success: false,
+            error:
+              'Invalid turf status.',
+          });
+        }
 
-      if (status !== undefined) {
         updatePayload.status =
           status;
       }
 
+      // ========================================
+      // CHECK NOTHING TO UPDATE
+      // ========================================
+
+      if (
+        Object.keys(
+          updatePayload,
+        ).length === 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'No valid Turf fields were provided for update.',
+        });
+      }
+
+      // ========================================
+      // UPDATE
+      // ========================================
+
       const updatedTurf =
         await Turf.findByIdAndUpdate(
           turfId,
-          updatePayload,
+
+          {
+            $set:
+              updatePayload,
+          },
+
           {
             new: true,
             runValidators: true,
           },
         );
 
+      if (!updatedTurf) {
+        return res.status(404).json({
+          success: false,
+          error:
+            'Turf not found after update.',
+        });
+      }
+
+      // ========================================
+      // RESPONSE
+      // ========================================
+
       return res.status(200).json({
         success: true,
+
         message:
           'Turf updated successfully.',
-        turf: updatedTurf,
+
+        turf:
+          updatedTurf,
       });
     } catch (error) {
       console.error(
-        'Update turf error:',
+        'UPDATE TURF ERROR:',
         error,
       );
 
       return res.status(400).json({
         success: false,
-        error: 'Failed to update turf.',
-        details: getErrorMessage(error),
+
+        error:
+          'Failed to update turf.',
+
+        details:
+          getErrorMessage(error),
       });
     }
   },
 );
 
-// ------------------------------------------
+// =====================================================
 // DELETE TURF
+// DELETE /api/turfs/:id
 //
 // IMPORTANT:
-// Courts are deleted BEFORE turf.
-// ------------------------------------------
+// Courts are deleted BEFORE Turf.
+// =====================================================
 
 app.delete(
   '/api/turfs/:id',
-  async (req: Request, res: Response) => {
+  async (
+    req: Request,
+    res: Response,
+  ) => {
     try {
-      const turfId = getParam(
-        req.params.id,
-      );
+      const turfId =
+        getParam(
+          req.params.id,
+        );
+
+      // ========================================
+      // VALIDATE ID
+      // ========================================
 
       if (
         !turfId ||
-        !isValidObjectId(turfId)
+        !isValidObjectId(
+          turfId,
+        )
       ) {
         return res.status(400).json({
-          error: 'Invalid Turf ID.',
+          success: false,
+          error:
+            'Invalid Turf ID.',
         });
       }
 
+      // ========================================
+      // FIND TURF
+      // ========================================
+
       const turf =
-        await Turf.findById(turfId);
+        await Turf.findById(
+          turfId,
+        );
 
       if (!turf) {
         return res.status(404).json({
-          error: 'Turf not found.',
+          success: false,
+          error:
+            'Turf not found.',
         });
       }
 
-      // Optional owner validation from request body
+      // ========================================
+      // OWNER VALIDATION
+      // ========================================
+
       const requestedOwner =
         req.body?.owner;
 
       if (
-        requestedOwner &&
-        turf.owner.toString() !==
-          String(requestedOwner)
+        requestedOwner !==
+          undefined &&
+        requestedOwner !==
+          null
       ) {
-        return res.status(403).json({
-          error:
-            'You cannot delete another owner\'s turf.',
-        });
+        if (
+          !isValidObjectId(
+            String(
+              requestedOwner,
+            ),
+          )
+        ) {
+          return res.status(400).json({
+            success: false,
+            error:
+              'Invalid owner ID.',
+          });
+        }
+
+        if (
+          turf.owner.toString() !==
+          String(
+            requestedOwner,
+          )
+        ) {
+          return res.status(403).json({
+            success: false,
+            error:
+              'You cannot delete another owner\'s turf.',
+          });
+        }
       }
 
-      // 1. Delete all courts
+      // ========================================
+      // DELETE COURTS FIRST
+      // ========================================
+
       const courtResult =
         await Court.deleteMany({
           turf: turf._id,
         });
 
-      // 2. Delete turf
+      // ========================================
+      // DELETE TURF
+      // ========================================
+
       await Turf.findByIdAndDelete(
         turf._id,
       );
+
+      // ========================================
+      // RESPONSE
+      // ========================================
 
       return res.status(200).json({
         success: true,
@@ -1050,21 +1387,27 @@ app.delete(
         message:
           'Turf and all associated courts deleted successfully.',
 
-        deletedTurfId: turf._id,
+        deletedTurfId:
+          turf._id,
 
         deletedCourts:
-          courtResult.deletedCount || 0,
+          courtResult.deletedCount ||
+          0,
       });
     } catch (error) {
       console.error(
-        'Delete turf error:',
+        'DELETE TURF ERROR:',
         error,
       );
 
       return res.status(500).json({
         success: false,
-        error: 'Failed to delete turf.',
-        details: getErrorMessage(error),
+
+        error:
+          'Failed to delete turf.',
+
+        details:
+          getErrorMessage(error),
       });
     }
   },
@@ -1074,42 +1417,57 @@ app.delete(
 // IMAGE UPLOAD
 // ==========================================
 
-const upload = multer({
-  storage: multer.memoryStorage(),
+const upload =
+  multer({
+    storage:
+      multer.memoryStorage(),
 
-  limits: {
-    fileSize: 10 * 1024 * 1024,
-  },
+    limits: {
+      fileSize:
+        10 * 1024 * 1024,
+    },
 
-  fileFilter: (
-    _req,
-    file,
-    cb,
-  ) => {
-    const allowedTypes = [
-      'image/jpeg',
-      'image/png',
-      'image/webp',
-    ];
+    fileFilter: (
+      _req,
+      file,
+      cb,
+    ) => {
+      const allowedTypes =
+        [
+          'image/jpeg',
+          'image/png',
+          'image/webp',
+        ];
 
-    if (
-      allowedTypes.includes(
-        file.mimetype,
-      )
-    ) {
-      cb(null, true);
-    } else {
-      cb(
-        new Error(
-          'Only JPG, PNG, and WEBP images are allowed.',
-        ),
-      );
-    }
-  },
-});
+      if (
+        allowedTypes.includes(
+          file.mimetype,
+        )
+      ) {
+        cb(
+          null,
+          true,
+        );
+      } else {
+        cb(
+          new Error(
+            'Only JPG, PNG, and WEBP images are allowed.',
+          ),
+        );
+      }
+    },
+  });
 
-app.post('/api/upload/turf-image',
-  upload.single('image'),
+// =====================================================
+// UPLOAD TURF IMAGE
+// POST /api/upload/turf-image
+// =====================================================
+
+app.post(
+  '/api/upload/turf-image',
+  upload.single(
+    'image',
+  ),
   async (
     req: Request,
     res: Response,
@@ -1117,28 +1475,42 @@ app.post('/api/upload/turf-image',
     try {
       if (!req.file) {
         return res.status(400).json({
-          error: 'Image file is required.',
+          success: false,
+          error:
+            'Image file is required.',
         });
       }
 
       const uploadResult =
         await new Promise<any>(
-          (resolve, reject) => {
+          (
+            resolve,
+            reject,
+          ) => {
             const stream =
               cloudinary.uploader.upload_stream(
                 {
                   folder:
                     'turf-booking/turfs',
-                  resource_type: 'image',
+
+                  resource_type:
+                    'image',
                 },
 
-                (error, result) => {
+                (
+                  error,
+                  result,
+                ) => {
                   if (error) {
-                    reject(error);
+                    reject(
+                      error,
+                    );
                     return;
                   }
 
-                  resolve(result);
+                  resolve(
+                    result,
+                  );
                 },
               );
 
@@ -1154,22 +1526,26 @@ app.post('/api/upload/turf-image',
         message:
           'Image uploaded successfully.',
 
-        url: uploadResult.secure_url,
+        url:
+          uploadResult.secure_url,
 
         publicId:
           uploadResult.public_id,
       });
     } catch (error) {
       console.error(
-        'Cloudinary upload error:',
+        'CLOUDINARY UPLOAD ERROR:',
         error,
       );
 
       return res.status(500).json({
         success: false,
+
         error:
           'Failed to upload image.',
-        details: getErrorMessage(error),
+
+        details:
+          getErrorMessage(error),
       });
     }
   },
