@@ -1,17 +1,6 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
 // =====================================================
-// OPERATING HOURS
-// =====================================================
-
-export interface IOperatingHour {
-  dayOfWeek: number; // 0 = Sunday, 1 = Monday ... 6 = Saturday
-  openTime: string;  // HH:mm -> "06:00"
-  closeTime: string; // HH:mm -> "23:00"
-  isClosed: boolean;
-}
-
-// =====================================================
 // TURF
 // =====================================================
 
@@ -19,14 +8,12 @@ export interface ITurf extends Document {
   owner: Types.ObjectId;
 
   name: string;
-  description: string;
-  address: string;
-  city: string;
 
-  location: {
-    type: 'Point';
-    coordinates: [number, number]; // [longitude, latitude]
-  };
+  description: string;
+
+  address: string;
+
+  city: string;
 
   images: {
     url: string;
@@ -35,50 +22,12 @@ export interface ITurf extends Document {
 
   amenities: string[];
 
-  operatingHours: IOperatingHour[];
-
   status: 'active' | 'inactive' | 'maintenance';
 
   createdAt: Date;
+
+  updatedAt: Date;
 }
-
-// =====================================================
-// OPERATING HOUR SCHEMA
-// =====================================================
-
-const OperatingHourSchema = new Schema<IOperatingHour>(
-  {
-    dayOfWeek: {
-      type: Number,
-      required: true,
-      min: 0,
-      max: 6,
-    },
-
-    openTime: {
-      type: String,
-      required: true,
-      default: '06:00',
-      match: /^([01]\d|2[0-3]):([0-5]\d)$/,
-    },
-
-    closeTime: {
-      type: String,
-      required: true,
-      default: '23:00',
-      match: /^([01]\d|2[0-3]):([0-5]\d)$/,
-    },
-
-    isClosed: {
-      type: Boolean,
-      required: true,
-      default: false,
-    },
-  },
-  {
-    _id: false,
-  },
-);
 
 // =====================================================
 // TURF SCHEMA
@@ -86,6 +35,10 @@ const OperatingHourSchema = new Schema<IOperatingHour>(
 
 const TurfSchema = new Schema<ITurf>(
   {
+    // =================================================
+    // OWNER
+    // =================================================
+
     owner: {
       type: Schema.Types.ObjectId,
       ref: 'User',
@@ -93,11 +46,20 @@ const TurfSchema = new Schema<ITurf>(
       index: true,
     },
 
+    // =================================================
+    // TURF NAME
+    // =================================================
+
     name: {
       type: String,
       required: true,
       trim: true,
+      maxlength: 150,
     },
+
+    // =================================================
+    // DESCRIPTION
+    // =================================================
 
     description: {
       type: String,
@@ -105,58 +67,25 @@ const TurfSchema = new Schema<ITurf>(
       trim: true,
     },
 
+    // =================================================
+    // ADDRESS
+    // =================================================
+
     address: {
       type: String,
       required: true,
       trim: true,
     },
 
+    // =================================================
+    // CITY
+    // =================================================
+
     city: {
       type: String,
       required: true,
       trim: true,
       index: true,
-    },
-
-    // =================================================
-    // GEO LOCATION
-    // =================================================
-
-    location: {
-      type: {
-        type: String,
-        enum: ['Point'],
-        required: true,
-        default: 'Point',
-      },
-
-      coordinates: {
-        type: [Number],
-        required: true,
-
-        validate: {
-  validator: (value: number[]) => {
-    if (!Array.isArray(value) || value.length !== 2) {
-      return false;
-    }
-
-    const longitude = value[0];
-    const latitude = value[1];
-
-    if (longitude === undefined || latitude === undefined) {
-      return false;
-    }
-
-    return (
-      longitude >= -180 &&
-      longitude <= 180 &&
-      latitude >= -90 &&
-      latitude <= 90
-    );
-  },
-  message: 'Coordinates must be [longitude, latitude] with valid values.',
-},
-      },
     },
 
     // =================================================
@@ -188,15 +117,6 @@ const TurfSchema = new Schema<ITurf>(
     },
 
     // =================================================
-    // DAILY OPERATING HOURS
-    // =================================================
-
-    operatingHours: {
-      type: [OperatingHourSchema],
-      default: [],
-    },
-
-    // =================================================
     // STATUS
     // =================================================
 
@@ -207,23 +127,20 @@ const TurfSchema = new Schema<ITurf>(
       index: true,
     },
 
+    // =================================================
+    // CREATED AT
+    // =================================================
+
     createdAt: {
       type: Date,
       default: Date.now,
     },
   },
+
   {
     timestamps: true,
   },
 );
-
-// =====================================================
-// GEO INDEX
-// =====================================================
-
-TurfSchema.index({
-  location: '2dsphere',
-});
 
 // =====================================================
 // MODEL
