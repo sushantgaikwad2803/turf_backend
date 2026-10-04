@@ -419,7 +419,6 @@ app.get('/api/turfs',
 // CREATE TURF
 // ------------------------------------------
 
-
 app.post(
   '/api/turfs',
   async (req: Request, res: Response) => {
@@ -430,9 +429,14 @@ app.post(
         description,
         address,
         city,
+        location,
         images,
         amenities,
       } = req.body;
+
+      // =================================================
+      // REQUIRED FIELD VALIDATION
+      // =================================================
 
       if (
         !owner ||
@@ -447,12 +451,60 @@ app.post(
         });
       }
 
+      // =================================================
+      // LOCATION VALIDATION
+      // =================================================
+
+      if (
+        !location ||
+        location.type !== 'Point' ||
+        !Array.isArray(location.coordinates) ||
+        location.coordinates.length !== 2
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'Valid location with [longitude, latitude] coordinates is required.',
+        });
+      }
+
+      const longitude = Number(
+        location.coordinates[0],
+      );
+
+      const latitude = Number(
+        location.coordinates[1],
+      );
+
+      if (
+        !Number.isFinite(longitude) ||
+        !Number.isFinite(latitude) ||
+        longitude < -180 ||
+        longitude > 180 ||
+        latitude < -90 ||
+        latitude > 90
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'Invalid location coordinates. Use [longitude, latitude].',
+        });
+      }
+
+      // =================================================
+      // OWNER ID VALIDATION
+      // =================================================
+
       if (!isValidObjectId(String(owner))) {
         return res.status(400).json({
           success: false,
           error: 'Invalid Owner ID.',
         });
       }
+
+      // =================================================
+      // FIND OWNER
+      // =================================================
 
       const ownerUser =
         await User.findById(owner).select(
@@ -466,6 +518,10 @@ app.post(
         });
       }
 
+      // =================================================
+      // OWNER ROLE VALIDATION
+      // =================================================
+
       if (ownerUser.role !== 'owner') {
         return res.status(403).json({
           success: false,
@@ -473,6 +529,10 @@ app.post(
             'Only owner accounts can create turfs.',
         });
       }
+
+      // =================================================
+      // CREATE TURF
+      // =================================================
 
       const newTurf = new Turf({
         owner: toObjectId(String(owner)),
@@ -488,6 +548,21 @@ app.post(
 
         city: String(city).trim(),
 
+        // =================================================
+        // LOCATION
+        // IMPORTANT:
+        // GeoJSON = [longitude, latitude]
+        // =================================================
+
+        location: {
+          type: 'Point',
+
+          coordinates: [
+            longitude,
+            latitude,
+          ],
+        },
+
         images:
           Array.isArray(images)
             ? images
@@ -501,32 +576,71 @@ app.post(
         status: 'inactive',
       });
 
+      // =================================================
+      // SAVE TURF
+      // =================================================
+
       const savedTurf =
         await newTurf.save();
 
+      // =================================================
+      // SUCCESS
+      // =================================================
+
       return res.status(201).json({
         success: true,
+
         message:
           'Turf submitted successfully and is waiting for admin approval.',
+
         turf: savedTurf,
       });
     } catch (error: any) {
-  console.error('========================================');
-  console.error('CREATE TURF BACKEND ERROR:', error);
-  console.error('ERROR MESSAGE:', error?.message);
-  console.error('ERROR NAME:', error?.name);
-  console.error('ERROR STACK:', error?.stack);
-  console.error('========================================');
+      console.error(
+        '========================================',
+      );
 
-  return res.status(400).json({
-    success: false,
-    error: 'Failed to create turf.',
-    details: error?.message || 'Unknown server error',
-    name: error?.name || 'UnknownError',
-  });
-}
+      console.error(
+        'CREATE TURF BACKEND ERROR:',
+        error,
+      );
+
+      console.error(
+        'ERROR MESSAGE:',
+        error?.message,
+      );
+
+      console.error(
+        'ERROR NAME:',
+        error?.name,
+      );
+
+      console.error(
+        'ERROR STACK:',
+        error?.stack,
+      );
+
+      console.error(
+        '========================================',
+      );
+
+      return res.status(400).json({
+        success: false,
+
+        error: 'Failed to create turf.',
+
+        details:
+          error?.message ||
+          'Unknown server error',
+
+        name:
+          error?.name ||
+          'UnknownError',
+      });
+    }
   },
 );
+
 // ------------------------------------------
 // UPDATE TURF
 // ------------------------------------------
