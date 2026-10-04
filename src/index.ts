@@ -434,10 +434,6 @@ app.post(
         amenities,
       } = req.body;
 
-      // --------------------------------------------------
-      // 1. Validate required fields
-      // --------------------------------------------------
-
       if (
         !owner ||
         !name ||
@@ -451,20 +447,12 @@ app.post(
         });
       }
 
-      // --------------------------------------------------
-      // 2. Validate owner ID
-      // --------------------------------------------------
-
       if (!isValidObjectId(String(owner))) {
         return res.status(400).json({
           success: false,
           error: 'Invalid Owner ID.',
         });
       }
-
-      // --------------------------------------------------
-      // 3. Check owner account
-      // --------------------------------------------------
 
       const ownerUser =
         await User.findById(owner).select(
@@ -478,10 +466,6 @@ app.post(
         });
       }
 
-      // --------------------------------------------------
-      // 4. Check owner role
-      // --------------------------------------------------
-
       if (ownerUser.role !== 'owner') {
         return res.status(403).json({
           success: false,
@@ -489,22 +473,6 @@ app.post(
             'Only owner accounts can create turfs.',
         });
       }
-
-      // --------------------------------------------------
-      // 5. Create Turf
-      //
-      // IMPORTANT:
-      // Turf does NOT contain:
-      //
-      // ❌ pricePerHour
-      // ❌ sports
-      // ❌ openingTime
-      // ❌ closingTime
-      // ❌ operatingHours
-      // ❌ location
-      //
-      // These belong elsewhere.
-      // --------------------------------------------------
 
       const newTurf = new Turf({
         owner: toObjectId(String(owner)),
@@ -530,48 +498,34 @@ app.post(
             ? amenities
             : [],
 
-        // New turf waits for admin approval
         status: 'inactive',
       });
-
-      // --------------------------------------------------
-      // 6. Save Turf
-      // --------------------------------------------------
 
       const savedTurf =
         await newTurf.save();
 
-      // --------------------------------------------------
-      // 7. Response
-      // --------------------------------------------------
-
       return res.status(201).json({
         success: true,
-
         message:
           'Turf submitted successfully and is waiting for admin approval.',
-
         turf: savedTurf,
       });
     } catch (error) {
       console.error(
-        'Create turf error:',
+        'CREATE TURF ERROR:',
         error,
       );
 
       return res.status(400).json({
         success: false,
-
         error:
           'Failed to create turf.',
-
         details:
           getErrorMessage(error),
       });
     }
   },
 );
-
 // ------------------------------------------
 // UPDATE TURF
 // ------------------------------------------
