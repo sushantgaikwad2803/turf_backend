@@ -4396,114 +4396,646 @@ app.put('/api/admin/turfs/:turfId/status',
 // GET /api/slots?turfId=xxx&courtId=xxx&date=YYYY-MM-DD
 // ============================================================
 
-app.get('/api/slots', async (req, res) => {
-  try {
-    const { turfId, courtId, date } = req.query;
+// ============================================================
+// GET SLOTS FOR TURF / COURT / DATE
+// ============================================================
+//
+// GET /api/slots?turfId=xxx&courtId=xxx&date=YYYY-MM-DD
+//
+// IMPORTANT:
+//
+// slot.id
+//   -> REAL MongoDB Slot._id
+//   -> Payment / Booking ke liye use hoga
+//
+// slot.bookingKey
+//   -> FRONTEND/UI ONLY
+//   -> Slot selection/matching ke liye use hoga
+//
+// NEVER use bookingKey as slotId.
+// ============================================================
 
-    if (!turfId || !courtId || !date) {
-      return res.status(400).json({
-        success: false,
-        message: 'turfId, courtId and date are required',
+app.get(
+  '/api/slots',
+  async (
+    req: Request,
+    res: Response,
+  ): Promise<void> => {
+    try {
+      // ========================================================
+      // 1. READ QUERY PARAMETERS SAFELY
+      // ========================================================
+      //
+      // Express req.query values can be:
+      //
+      // string
+      // ParsedQs
+      // array
+      // undefined
+      //
+      // Isliye direct getParam(req.query.xxx) mat karo.
+      // typeof === 'string' se safely validate karo.
+      // ========================================================
+
+      const turfId =
+        typeof req.query.turfId === 'string'
+          ? req.query.turfId.trim()
+          : undefined;
+
+      const courtId =
+        typeof req.query.courtId === 'string'
+          ? req.query.courtId.trim()
+          : undefined;
+
+      const date =
+        typeof req.query.date === 'string'
+          ? req.query.date.trim()
+          : undefined;
+
+      // ========================================================
+      // 2. REQUIRED PARAMETERS
+      // ========================================================
+
+      if (!turfId || !courtId || !date) {
+        res.status(400).json({
+          success: false,
+          message:
+            'turfId, courtId and date are required',
+        });
+
+        return;
+      }
+
+      // ========================================================
+      // 3. VALIDATE TURF ID
+      // ========================================================
+
+      if (!isValidObjectId(turfId)) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid turfId',
+        });
+
+        return;
+      }
+
+      // ========================================================
+      // 4. VALIDATE COURT ID
+      // ========================================================
+
+      if (!isValidObjectId(courtId)) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid courtId',
+        });
+
+        return;
+      }
+
+      // ========================================================
+      // 5. VALIDATE DATE FORMAT
+      // ========================================================
+      //
+      // Expected:
+      //
+      // YYYY-MM-DD
+      //
+      // Example:
+      // 2026-10-06
+      // ========================================================
+
+      const datePattern =
+        /^\d{4}-\d{2}-\d{2}$/;
+
+      if (!datePattern.test(date)) {
+        res.status(400).json({
+          success: false,
+          message:
+            'Invalid date format. Use YYYY-MM-DD',
+        });
+
+        return;
+      }
+
+      // ========================================================
+      // 6. CONVERT IDs TO OBJECTID
+      // ========================================================
+
+      const turfObjectId =
+        new mongoose.Types.ObjectId(
+          turfId,
+        );
+
+      const courtObjectId =
+        new mongoose.Types.ObjectId(
+          courtId,
+        );
+
+      // ========================================================
+      // 7. VERIFY COURT BELONGS TO TURF
+      // ========================================================
+
+      const court =
+        await Court.findOne({
+          _id: courtObjectId,
+          turf: turfObjectId,
+        }).lean();
+
+      if (!court) {
+        res.status(404).json({
+          success: false,
+          message:
+            'Court not found for this turf',
+        });
+
+        return;
+      }
+
+      // ========================================================
+      // 8. CREATE DATE RANGE
+      // ========================================================
+
+      const startOfDay =
+        new Date(
+          `${date}T00:00:00.000`,
+        );
+
+      const endOfDay =
+        new Date(
+          `${date}T23:59:59.999`,
+        );
+
+      if (
+        Number.isNaN(
+          startOfDay.getTime(),
+        ) ||
+        Number.isNaN(
+          endOfDay.getTime(),
+        )
+      ) {
+        res.status(400).json({
+          success: false,
+          message:
+            'Invalid date. Use YYYY-MM-DD',
+        });
+
+        return;
+      }
+
+      // ========================================================
+      // 9. LOAD SLOTS FROM MONGODB
+      // ========================================================
+      //
+      // IMPORTANT:
+      //
+      // We are NOT generating fake IDs here.
+      //
+      // MongoDB _id will remain the real slot ID.
+      // ========================================================
+
+      const databaseSlots =
+        await Slot.find({
+          court: courtObjectId,
+
+          date: {
+            $gte: startOfDay,
+            $lte: endOfDay,
+          },
+        })
+          .sort({
+            startTime: 1,
+          })
+          .lean();
+
+      // ========================================================
+      // 10. COURT PRICING
+      // ========================================================
+
+      const regularPrice =
+        Number(
+          (court as any)
+            .pricePerHour ?? 0,
+        );
+
+      const nightPrice =
+        Number(
+          (court as any)
+            .nightPricePerHour ??
+            regularPrice,
+        );
+
+      const hasNightPricing =
+        Boolean(
+          (court as any)
+            .hasNightPricing,
+        );
+
+      const nightStartHour =
+        Number(
+          (court as any)
+            .nightStartHour,
+        );
+
+      const nightEndHour =
+        Number(
+          (court as any)
+            .nightEndHour,
+        );
+
+      // ========================================================
+      // 11. NIGHT SLOT CHECK
+      // ========================================================
+
+      const isNightSlot = (
+        startMinutes: number,
+      ): boolean => {
+        if (!hasNightPricing) {
+          return false;
+        }
+
+        if (
+          !Number.isInteger(
+            nightStartHour,
+          ) ||
+          !Number.isInteger(
+            nightEndHour,
+          )
+        ) {
+          return false;
+        }
+
+        const nightStart =
+          nightStartHour * 60;
+
+        const nightEnd =
+          nightEndHour * 60;
+
+        // Example:
+        // 18:00 -> 23:00
+        if (
+          nightStart < nightEnd
+        ) {
+          return (
+            startMinutes >=
+              nightStart &&
+            startMinutes <
+              nightEnd
+          );
+        }
+
+        // Example:
+        // 22:00 -> 06:00
+        if (
+          nightStart > nightEnd
+        ) {
+          return (
+            startMinutes >=
+              nightStart ||
+            startMinutes <
+              nightEnd
+          );
+        }
+
+        // Same start/end means no night range.
+        return false;
+      };
+
+      // ========================================================
+      // 12. NORMALIZE DATABASE SLOTS
+      // ========================================================
+
+      const normalizedSlots =
+        databaseSlots.map(
+          (slot: any) => {
+            // --------------------------------------------------
+            // TIME
+            // --------------------------------------------------
+
+            const startTime =
+              String(
+                slot.startTime ?? '',
+              ).trim();
+
+            const endTime =
+              String(
+                slot.endTime ?? '',
+              ).trim();
+
+            // --------------------------------------------------
+            // START MINUTES
+            // --------------------------------------------------
+
+            const timeParts =
+              startTime.split(':');
+
+            const hour =
+              Number(
+                timeParts[0],
+              );
+
+            const minute =
+              Number(
+                timeParts[1] ?? 0,
+              );
+
+            const startMinutes =
+              Number.isFinite(hour) &&
+              Number.isFinite(minute)
+                ? hour * 60 + minute
+                : 0;
+
+            // --------------------------------------------------
+            // REAL MONGODB ID
+            // --------------------------------------------------
+
+            const databaseId =
+              String(slot._id);
+
+            // --------------------------------------------------
+            // FRONTEND BOOKING KEY
+            // --------------------------------------------------
+            //
+            // This is NOT a MongoDB ID.
+            // It is only used for UI selection.
+            // --------------------------------------------------
+
+            const bookingKey =
+              `${date}_${courtId}_${startMinutes}`;
+
+            // --------------------------------------------------
+            // STATUS
+            // --------------------------------------------------
+
+            const status =
+              String(
+                slot.status ??
+                  'available',
+              ).toLowerCase();
+
+            // --------------------------------------------------
+            // BOOKED CHECK
+            // --------------------------------------------------
+
+            const isBooked =
+              status === 'booked' ||
+              status === 'reserved' ||
+              status === 'blocked';
+
+            // --------------------------------------------------
+            // PRICE
+            // --------------------------------------------------
+
+            const databasePrice =
+              Number(slot.price);
+
+            let price =
+              Number.isFinite(
+                databasePrice,
+              )
+                ? databasePrice
+                : regularPrice;
+
+            // --------------------------------------------------
+            // FALLBACK PRICE
+            // --------------------------------------------------
+
+            if (
+              !Number.isFinite(price) ||
+              price < 0
+            ) {
+              price = 0;
+            }
+
+            // --------------------------------------------------
+            // NIGHT PRICE FALLBACK
+            // --------------------------------------------------
+
+            if (
+              !Number.isFinite(
+                databasePrice,
+              ) &&
+              isNightSlot(
+                startMinutes,
+              )
+            ) {
+              price =
+                Number.isFinite(
+                  nightPrice,
+                ) &&
+                nightPrice >= 0
+                  ? nightPrice
+                  : price;
+            }
+
+            // --------------------------------------------------
+            // END MINUTES
+            // --------------------------------------------------
+
+            const calculatedEndMinutes =
+              startMinutes + 60;
+
+            const endMinutes =
+              calculatedEndMinutes >=
+              1440
+                ? calculatedEndMinutes -
+                  1440
+                : calculatedEndMinutes;
+
+            // --------------------------------------------------
+            // FINAL RESPONSE OBJECT
+            // --------------------------------------------------
+
+            return {
+              // REAL DATABASE ID
+              _id: databaseId,
+
+              // REAL DATABASE ID
+              id: databaseId,
+
+              // UI ONLY
+              bookingKey,
+
+              turfId: turfId,
+
+              courtId: courtId,
+
+              date,
+
+              startTime,
+
+              endTime,
+
+              startMinutes,
+
+              endMinutes,
+
+              price,
+
+              status,
+
+              // true for booked/reserved/blocked
+              booked: isBooked,
+
+              // true ONLY when available
+              available:
+                status ===
+                'available',
+
+              isNight:
+                isNightSlot(
+                  startMinutes,
+                ),
+            };
+          },
+        );
+
+      // ========================================================
+      // 13. BOOKED SLOTS
+      // ========================================================
+      //
+      // IMPORTANT:
+      //
+      // slotId = REAL MongoDB _id
+      //
+      // NOT:
+      // 2026-10-06_courtId_1020
+      // ========================================================
+
+      const bookedSlots =
+        normalizedSlots
+          .filter(
+            (slot) =>
+              slot.status ===
+                'booked' ||
+              slot.status ===
+                'reserved' ||
+              slot.status ===
+                'blocked',
+          )
+          .map(
+            (slot) => ({
+              // REAL MONGODB SLOT ID
+              slotId: slot.id,
+
+              // Also provide _id
+              _id: slot.id,
+
+              // UI matching key
+              bookingKey:
+                slot.bookingKey,
+
+              startTime:
+                slot.startTime,
+
+              endTime:
+                slot.endTime,
+
+              status:
+                slot.status,
+
+              price:
+                slot.price,
+            }),
+          );
+
+      // ========================================================
+      // 14. AVAILABLE SLOTS
+      // ========================================================
+
+      const availableSlots =
+        normalizedSlots.filter(
+          (slot) =>
+            slot.status ===
+            'available',
+        );
+
+      // ========================================================
+      // 15. DATABASE ID VALIDATION
+      // ========================================================
+
+      const allSlotsHaveDatabaseIds =
+        normalizedSlots.every(
+          (slot) =>
+            mongoose.Types.ObjectId.isValid(
+              slot.id,
+            ),
+        );
+
+      // ========================================================
+      // 16. RESPONSE
+      // ========================================================
+
+      res.status(200).json({
+        success: true,
+
+        message:
+          'Slots loaded successfully',
+
+        date,
+
+        turfId,
+
+        courtId,
+
+        // Total database slots
+        count:
+          normalizedSlots.length,
+
+        // Available slots
+        availableCount:
+          availableSlots.length,
+
+        // Booked/reserved/blocked
+        bookedCount:
+          bookedSlots.length,
+
+        // Main slots array
+        slots:
+          normalizedSlots,
+
+        // Booked slots for frontend
+        bookedSlots,
+
+        // Debug / validation information
+        meta: {
+          hasDatabaseSlots:
+            normalizedSlots.length >
+            0,
+
+          allSlotsHaveDatabaseIds,
+
+          databaseSlotCount:
+            databaseSlots.length,
+        },
       });
-    }
 
-    if (
-      !mongoose.Types.ObjectId.isValid(String(turfId)) ||
-      !mongoose.Types.ObjectId.isValid(String(courtId))
-    ) {
-      return res.status(400).json({
+      return;
+    } catch (error) {
+      // ========================================================
+      // ERROR HANDLING
+      // ========================================================
+
+      console.error(
+        'GET /api/slots error:',
+        error,
+      );
+
+      res.status(500).json({
         success: false,
-        message: 'Invalid turfId or courtId',
+
+        message:
+          'Failed to load slots',
+
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Unknown server error',
       });
+
+      return;
     }
-    const turfObjectId = new mongoose.Types.ObjectId(String(turfId));
-    const courtObjectId = new mongoose.Types.ObjectId(String(courtId));
-
-    // --------------------------------------------------------
-    // Verify that this court belongs to this turf
-    // --------------------------------------------------------
-    const court = await Court.findOne({
-      _id: courtObjectId,
-      turf: turfObjectId,
-    }).lean();
-
-    if (!court) {
-      return res.status(404).json({
-        success: false,
-        message: 'Court not found for this turf',
-      });
-    }
-
-    // --------------------------------------------------------
-    // Convert YYYY-MM-DD into start/end of that day
-    // --------------------------------------------------------
-    const dateString = String(date);
-
-    const startOfDay = new Date(`${dateString}T00:00:00.000`);
-    const endOfDay = new Date(`${dateString}T23:59:59.999`);
-
-    if (
-      Number.isNaN(startOfDay.getTime()) ||
-      Number.isNaN(endOfDay.getTime())
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid date format. Use YYYY-MM-DD',
-      });
-    }
-
-    // --------------------------------------------------------
-    // Find slots for this court and date
-    // --------------------------------------------------------
-    const slots = await Slot.find({
-      court: courtObjectId,
-      date: {
-        $gte: startOfDay,
-        $lte: endOfDay,
-      },
-    })
-      .sort({ startTime: 1 })
-      .lean();
-
-    // --------------------------------------------------------
-    // Frontend expects bookedSlots
-    // --------------------------------------------------------
-    const bookedSlots = slots
-      .filter(
-        (slot) =>
-          slot.status === 'booked' ||
-          slot.status === 'reserved' ||
-          slot.status === 'blocked',
-      )
-      .map((slot) => ({
-        // slotId is the real MongoDB Slot._id.
-        // bookingKey is only for frontend/UI matching.
-        slotId: String(slot._id),
-        bookingKey: `${dateString}_${courtId}_${slot.startTime}`,
-        startTime: slot.startTime,
-        endTime: slot.endTime,
-        status: slot.status,
-        price: slot.price,
-      }));
-
-    return res.status(200).json({
-      success: true,
-      date: dateString,
-      turfId: String(turfId),
-      courtId: String(courtId),
-      slots,
-      bookedSlots,
-    });
-  } catch (error) {
-    console.error('GET /api/slots error:', error);
-
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to load slots',
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
+  },
+);
 
 
 // ======================================================
