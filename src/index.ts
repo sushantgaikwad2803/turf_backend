@@ -4534,8 +4534,7 @@ app.get('/api/slots', async (req, res) => {
 //
 // ======================================================
 
-app.post(
-  '/bookings/create',
+app.post('/api/bookings/create',
   async (
     req: Request,
     res: Response,
