@@ -6742,6 +6742,1239 @@ app.get(
 // React Native notification screen because notifications are
 // generated from Booking records and are not stored separately.
 
+
+// ======================================================
+// DIRECT BOOKING API
+// ======================================================
+//
+// POST /bookings/create
+//
+// NO PAYMENT GATEWAY
+//
+// Flow:
+//
+// 1. Validate user
+// 2. Validate turf
+// 3. Validate court
+// 4. Validate selected slots
+// 5. Start MongoDB transaction
+// 6. Lock slots: available -> booked
+// 7. Calculate amount from database
+// 8. Create Booking records
+// 9. Calculate 2% platform fee
+// 10. Create Payment as success
+// 11. Create Payout
+// 12. Commit transaction
+//
+// If anything fails:
+//
+// abortTransaction()
+//        ↓
+// Everything rolls back
+//
+// ======================================================
+
+app.post(
+  '/bookings/create',
+  async (
+    req: Request,
+    res: Response,
+  ): Promise<void> => {
+    const session =
+      await mongoose.startSession();
+
+    try {
+      // ==================================================
+      // REQUEST BODY
+      // ==================================================
+
+      const {
+        userId,
+        turfId,
+        courtId,
+        bookings,
+        couponId,
+      } = req.body;
+
+      // ==================================================
+      // BASIC VALIDATION
+      // ==================================================
+
+      if (!userId) {
+        res.status(400).json({
+          success: false,
+          message: 'userId is required',
+        });
+        return;
+      }
+
+      if (!turfId) {
+        res.status(400).json({
+          success: false,
+          message: 'turfId is required',
+        });
+        return;
+      }
+
+      if (!courtId) {
+        res.status(400).json({
+          success: false,
+          message: 'courtId is required',
+        });
+        return;
+      }
+
+      if (
+        !Array.isArray(bookings) ||
+        bookings.length === 0
+      ) {
+        res.status(400).json({
+          success: false,
+          message:
+            'At least one booking date is required',
+        });
+        return;
+      }
+
+      // ==================================================
+      // OBJECT ID VALIDATION
+      // ==================================================
+
+      if (
+        !isValidObjectId(
+          String(userId),
+        )
+      ) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid userId',
+        });
+        return;
+      }
+
+      if (
+        !isValidObjectId(
+          String(turfId),
+        )
+      ) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid turfId',
+        });
+        return;
+      }
+
+      if (
+        !isValidObjectId(
+          String(courtId),
+        )
+      ) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid courtId',
+        });
+        return;
+      }
+
+      if (
+        couponId &&
+        !isValidObjectId(
+          String(couponId),
+        )
+      ) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid couponId',
+        });
+        return;
+      }
+
+      // ==================================================
+      // CONVERT IDS
+      // ==================================================
+
+      const userObjectId =
+        new mongoose.Types.ObjectId(
+          String(userId),
+        );
+
+      const turfObjectId =
+        new mongoose.Types.ObjectId(
+          String(turfId),
+        );
+
+      const courtObjectId =
+        new mongoose.Types.ObjectId(
+          String(courtId),
+        );
+
+      const couponObjectId =
+        couponId
+          ? new mongoose.Types.ObjectId(
+              String(couponId),
+            )
+          : undefined;
+
+      // ==================================================
+      // VALIDATE USER
+      // ==================================================
+
+      const user =
+        await User.findById(
+          userObjectId,
+        ).select('_id');
+
+      if (!user) {
+        res.status(404).json({
+          success: false,
+          message: 'User not found',
+        });
+        return;
+      }
+
+      // ==================================================
+      // VALIDATE TURF
+      // ==================================================
+
+      const turf =
+        await Turf.findById(
+          turfObjectId,
+        );
+
+      if (!turf) {
+        res.status(404).json({
+          success: false,
+          message: 'Turf not found',
+        });
+        return;
+      }
+
+      // ==================================================
+      // VALIDATE COURT
+      // ==================================================
+
+      const court =
+        await Court.findById(
+          courtObjectId,
+        );
+
+      if (!court) {
+        res.status(404).json({
+          success: false,
+          message: 'Court not found',
+        });
+        return;
+      }
+
+      // ==================================================
+      // COURT -> TURF VALIDATION
+      // ==================================================
+
+      const courtTurfId =
+        (court as any).turf ??
+        (court as any).turfId;
+
+      if (
+        courtTurfId &&
+        String(courtTurfId) !==
+          String(turfObjectId)
+      ) {
+        res.status(400).json({
+          success: false,
+          message:
+            'Selected court does not belong to this turf',
+        });
+        return;
+      }
+
+      // ==================================================
+      // FLATTEN SELECTED SLOTS
+      // ==================================================
+
+      type SelectedSlot = {
+        slotId: string;
+        date: string;
+      };
+
+      const selectedSlots: SelectedSlot[] =
+        [];
+
+      for (
+        const bookingGroup of bookings
+      ) {
+        if (
+          !bookingGroup ||
+          !bookingGroup.date
+        ) {
+          throw new Error(
+            'Each booking must contain a date',
+          );
+        }
+
+        if (
+          !Array.isArray(
+            bookingGroup.slots,
+          ) ||
+          bookingGroup.slots.length === 0
+        ) {
+          throw new Error(
+            `No slots selected for date ${bookingGroup.date}`,
+          );
+        }
+
+        for (
+          const selectedSlot of
+            bookingGroup.slots
+        ) {
+          const slotId =
+            typeof selectedSlot ===
+            'string'
+              ? selectedSlot
+              : selectedSlot?.id;
+
+          if (!slotId) {
+            throw new Error(
+              'Every selected slot must contain an id',
+            );
+          }
+
+          if (
+            !isValidObjectId(
+              String(slotId),
+            )
+          ) {
+            throw new Error(
+              `Invalid slot id: ${slotId}`,
+            );
+          }
+
+          selectedSlots.push({
+            slotId: String(slotId),
+            date: String(
+              bookingGroup.date,
+            ),
+          });
+        }
+      }
+
+      // ==================================================
+      // PREVENT DUPLICATE SLOT IDS
+      // ==================================================
+
+      const slotIds =
+        selectedSlots.map(
+          item => item.slotId,
+        );
+
+      const uniqueSlotIds =
+        Array.from(
+          new Set(slotIds),
+        );
+
+      if (
+        uniqueSlotIds.length !==
+        slotIds.length
+      ) {
+        res.status(400).json({
+          success: false,
+          message:
+            'Duplicate slot selected',
+        });
+        return;
+      }
+
+      // ==================================================
+      // START TRANSACTION
+      // ==================================================
+
+      session.startTransaction();
+
+      // ==================================================
+      // LOAD SELECTED SLOTS
+      // ==================================================
+
+      const dbSlots =
+        await Slot.find({
+          _id: {
+            $in: uniqueSlotIds,
+          },
+        })
+          .session(session)
+          .lean();
+
+      // ==================================================
+      // CHECK ALL SLOTS EXIST
+      // ==================================================
+
+      if (
+        dbSlots.length !==
+        uniqueSlotIds.length
+      ) {
+        throw new Error(
+          'One or more selected slots no longer exist',
+        );
+      }
+
+      // ==================================================
+      // SLOT MAP
+      // ==================================================
+
+      const slotMap =
+        new Map<
+          string,
+          (typeof dbSlots)[number]
+        >();
+
+      for (
+        const slot of dbSlots
+      ) {
+        slotMap.set(
+          String(slot._id),
+          slot,
+        );
+      }
+
+      // ==================================================
+      // VALIDATE EVERY SLOT
+      // ==================================================
+
+      for (
+        const selected of selectedSlots
+      ) {
+        const slot =
+          slotMap.get(
+            selected.slotId,
+          );
+
+        if (!slot) {
+          throw new Error(
+            `Slot ${selected.slotId} not found`,
+          );
+        }
+
+        // ------------------------------------------------
+        // COURT CHECK
+        // ------------------------------------------------
+
+        if (
+          String(slot.court) !==
+          String(courtObjectId)
+        ) {
+          throw new Error(
+            'One or more selected slots do not belong to the selected court',
+          );
+        }
+
+        // ------------------------------------------------
+        // STATUS CHECK
+        // ------------------------------------------------
+
+        if (
+          slot.status !==
+          'available'
+        ) {
+          throw new Error(
+            `Slot ${slot.startTime} - ${slot.endTime} is no longer available`,
+          );
+        }
+
+        // ------------------------------------------------
+        // DATE CHECK
+        // ------------------------------------------------
+
+        const requestedDate =
+          new Date(
+            selected.date,
+          );
+
+        if (
+          Number.isNaN(
+            requestedDate.getTime(),
+          )
+        ) {
+          throw new Error(
+            `Invalid booking date: ${selected.date}`,
+          );
+        }
+
+        const slotDate =
+          new Date(slot.date);
+
+        const requestedDateKey =
+          requestedDate
+            .toISOString()
+            .slice(0, 10);
+
+        const slotDateKey =
+          slotDate
+            .toISOString()
+            .slice(0, 10);
+
+        if (
+          requestedDateKey !==
+          slotDateKey
+        ) {
+          throw new Error(
+            `Slot ${slot.startTime} - ${slot.endTime} does not belong to ${selected.date}`,
+          );
+        }
+      }
+
+      // ==================================================
+      // COUPON
+      // ==================================================
+
+      let coupon:
+        | any
+        | null = null;
+
+      let discountAmount = 0;
+
+      if (couponObjectId) {
+        coupon =
+          await Coupon.findById(
+            couponObjectId,
+          ).session(session);
+
+        if (!coupon) {
+          throw new Error(
+            'Coupon not found',
+          );
+        }
+      }
+
+      // ==================================================
+      // CALCULATE GROSS AMOUNT
+      //
+      // IMPORTANT:
+      // PRICE COMES FROM DATABASE.
+      // NEVER TRUST FRONTEND PRICE.
+      // ==================================================
+
+      let grossAmount = 0;
+
+      for (
+        const selected of selectedSlots
+      ) {
+        const slot =
+          slotMap.get(
+            selected.slotId,
+          );
+
+        if (!slot) {
+          throw new Error(
+            'Selected slot not found',
+          );
+        }
+
+        const price =
+          Number(
+            slot.price ?? 0,
+          );
+
+        if (
+          !Number.isFinite(price) ||
+          price < 0
+        ) {
+          throw new Error(
+            `Invalid price for slot ${selected.slotId}`,
+          );
+        }
+
+        grossAmount += price;
+      }
+
+      // ==================================================
+      // COUPON CALCULATION
+      // ==================================================
+
+      if (coupon) {
+        const discountPercent =
+          Number(
+            coupon.discountPercent ??
+              coupon.discountPercentage ??
+              0,
+          );
+
+        const fixedDiscount =
+          Number(
+            coupon.discountAmount ??
+              coupon.amount ??
+              0,
+          );
+
+        if (
+          Number.isFinite(
+            discountPercent,
+          ) &&
+          discountPercent > 0
+        ) {
+          discountAmount =
+            grossAmount *
+            (discountPercent / 100);
+        } else if (
+          Number.isFinite(
+            fixedDiscount,
+          ) &&
+          fixedDiscount > 0
+        ) {
+          discountAmount =
+            fixedDiscount;
+        }
+      }
+
+      // ==================================================
+      // DISCOUNT CANNOT EXCEED GROSS
+      // ==================================================
+
+      discountAmount =
+        Math.min(
+          Math.max(
+            discountAmount,
+            0,
+          ),
+          grossAmount,
+        );
+
+      // ==================================================
+      // MONEY ROUNDING
+      // ==================================================
+
+      const roundMoney = (
+        value: number,
+      ): number => {
+        return (
+          Math.round(
+            (value +
+              Number.EPSILON) *
+              100,
+          ) / 100
+        );
+      };
+
+      const finalGrossAmount =
+        roundMoney(
+          grossAmount,
+        );
+
+      const finalDiscountAmount =
+        roundMoney(
+          discountAmount,
+        );
+
+      const finalBookingAmount =
+        roundMoney(
+          Math.max(
+            0,
+            grossAmount -
+              discountAmount,
+          ),
+        );
+
+      // ==================================================
+      // LOCK SLOTS
+      //
+      // available -> booked
+      //
+      // IMPORTANT:
+      // Update only if status is still
+      // available.
+      // ==================================================
+
+      const lockedSlots: any[] =
+        [];
+
+      for (
+        const selected of selectedSlots
+      ) {
+        const lockedSlot =
+          await Slot.findOneAndUpdate(
+            {
+              _id:
+                new mongoose.Types.ObjectId(
+                  selected.slotId,
+                ),
+
+              court:
+                courtObjectId,
+
+              status:
+                'available',
+            },
+            {
+              $set: {
+                status:
+                  'booked',
+              },
+            },
+            {
+              new: true,
+              session,
+            },
+          );
+
+        if (!lockedSlot) {
+          throw new Error(
+            'One or more selected slots were booked by another user. Please refresh and try again.',
+          );
+        }
+
+        lockedSlots.push(
+          lockedSlot,
+        );
+      }
+
+      // ==================================================
+      // CREATE BOOKING DOCUMENTS
+      //
+      // ONE BOOKING PER SLOT
+      // ==================================================
+
+      const bookingDocuments: any[] =
+        [];
+
+      for (
+        const selected of selectedSlots
+      ) {
+        const slot =
+          slotMap.get(
+            selected.slotId,
+          );
+
+        if (!slot) {
+          throw new Error(
+            'Selected slot not found while creating booking',
+          );
+        }
+
+        const slotPrice =
+          Number(
+            slot.price ?? 0,
+          );
+
+        // ----------------------------------------------
+        // Proportional discount
+        // ----------------------------------------------
+
+        let slotDiscount = 0;
+
+        if (
+          finalGrossAmount > 0
+        ) {
+          slotDiscount =
+            finalDiscountAmount *
+            (slotPrice /
+              finalGrossAmount);
+        }
+
+        slotDiscount =
+          roundMoney(
+            slotDiscount,
+          );
+
+        const slotFinalAmount =
+          roundMoney(
+            Math.max(
+              0,
+              slotPrice -
+                slotDiscount,
+            ),
+          );
+
+        bookingDocuments.push({
+          user:
+            userObjectId,
+
+          turf:
+            turfObjectId,
+
+          court:
+            courtObjectId,
+
+          slot:
+            new mongoose.Types.ObjectId(
+              selected.slotId,
+            ),
+
+          ...(couponObjectId
+            ? {
+                coupon:
+                  couponObjectId,
+              }
+            : {}),
+
+          bookingDate:
+            new Date(
+              selected.date,
+            ),
+
+          startTime:
+            slot.startTime,
+
+          endTime:
+            slot.endTime,
+
+          grossAmount:
+            roundMoney(
+              slotPrice,
+            ),
+
+          discountAmount:
+            slotDiscount,
+
+          finalAmount:
+            slotFinalAmount,
+
+          status:
+            'confirmed',
+        });
+      }
+
+      // ==================================================
+      // INSERT BOOKINGS
+      // ==================================================
+
+      const createdBookings =
+        await Booking.insertMany(
+          bookingDocuments,
+          {
+            session,
+          },
+        );
+
+      // ==================================================
+      // TYPESCRIPT SAFETY
+      // ==================================================
+
+      if (
+        !createdBookings ||
+        createdBookings.length === 0
+      ) {
+        throw new Error(
+          'Booking records could not be created',
+        );
+      }
+
+      // ==================================================
+      // VERY IMPORTANT
+      //
+      // DO NOT USE:
+      //
+      // createdBookings[0]._id
+      //
+      // directly.
+      //
+      // TypeScript may consider [0]
+      // possibly undefined.
+      // ==================================================
+
+      const firstBooking =
+        createdBookings[0];
+
+      if (!firstBooking) {
+        throw new Error(
+          'First booking record could not be created',
+        );
+      }
+
+      // ==================================================
+      // PLATFORM FEE
+      //
+      // 2% OF FINAL PAID AMOUNT
+      // ==================================================
+
+      const platformFeePercent =
+        2;
+
+      const platformFeeAmount =
+        roundMoney(
+          finalBookingAmount *
+            (platformFeePercent /
+              100),
+        );
+
+      const ownerAmount =
+        roundMoney(
+          finalBookingAmount -
+            platformFeeAmount,
+        );
+
+      // ==================================================
+      // CREATE PAYMENT
+      //
+      // NO PAYMENT GATEWAY
+      // DIRECT SUCCESS
+      // ==================================================
+
+      const paymentDocuments =
+        await Payment.create(
+          [
+            {
+              // Payment schema currently
+              // contains one booking reference.
+              //
+              // For multiple slots, the first
+              // booking is used as the parent
+              // payment reference.
+
+              booking:
+                firstBooking._id,
+
+              user:
+                userObjectId,
+
+              totalPaid:
+                finalBookingAmount,
+
+              platformFeePercent:
+                platformFeePercent,
+
+              platformFeeAmount:
+                platformFeeAmount,
+
+              ownerAmount:
+                ownerAmount,
+
+              paymentMethod:
+                'direct',
+
+              status:
+                'success',
+            },
+          ],
+          {
+            session,
+          },
+        );
+
+      // ==================================================
+      // TYPESCRIPT SAFETY
+      // ==================================================
+
+      const payment =
+        paymentDocuments[0];
+
+      if (!payment) {
+        throw new Error(
+          'Payment record could not be created',
+        );
+      }
+
+      // ==================================================
+      // CREATE PAYOUT
+      // ==================================================
+
+      const payoutDocuments =
+        await Payout.create(
+          [
+            {
+              owner:
+                turf.owner,
+
+              payment:
+                payment._id,
+
+              totalBookingAmount:
+                finalBookingAmount,
+
+              platformCommission:
+                platformFeeAmount,
+
+              netPayoutAmount:
+                ownerAmount,
+
+              /*
+               * This is only an internal payout
+               * accounting record.
+               *
+               * No real gateway/bank transfer
+               * is performed.
+               */
+
+              status:
+                'processed',
+            },
+          ],
+          {
+            session,
+          },
+        );
+
+      // ==================================================
+      // TYPESCRIPT SAFETY
+      // ==================================================
+
+      const payout =
+        payoutDocuments[0];
+
+      if (!payout) {
+        throw new Error(
+          'Payout record could not be created',
+        );
+      }
+
+      // ==================================================
+      // COMMIT TRANSACTION
+      // ==================================================
+
+      await session.commitTransaction();
+
+      // ==================================================
+      // SUCCESS RESPONSE
+      // ==================================================
+
+      res.status(201).json({
+        success: true,
+
+        message:
+          'Booking confirmed and payment successful',
+
+        // ----------------------------------------------
+        // Booking IDs
+        // ----------------------------------------------
+
+        bookingIds:
+          createdBookings.map(
+            booking =>
+              booking._id,
+          ),
+
+        // ----------------------------------------------
+        // Bookings
+        // ----------------------------------------------
+
+        bookings:
+          createdBookings.map(
+            booking => ({
+              _id:
+                booking._id,
+
+              user:
+                booking.user,
+
+              turf:
+                booking.turf,
+
+              court:
+                booking.court,
+
+              slot:
+                booking.slot,
+
+              bookingDate:
+                booking.bookingDate,
+
+              startTime:
+                booking.startTime,
+
+              endTime:
+                booking.endTime,
+
+              grossAmount:
+                booking.grossAmount,
+
+              discountAmount:
+                booking.discountAmount,
+
+              finalAmount:
+                booking.finalAmount,
+
+              status:
+                booking.status,
+            }),
+          ),
+
+        // ----------------------------------------------
+        // Payment
+        // ----------------------------------------------
+
+        payment: {
+          _id:
+            payment._id,
+
+          totalPaid:
+            payment.totalPaid,
+
+          platformFeePercent:
+            payment.platformFeePercent,
+
+          platformFeeAmount:
+            payment.platformFeeAmount,
+
+          ownerAmount:
+            payment.ownerAmount,
+
+          paymentMethod:
+            payment.paymentMethod,
+
+          status:
+            payment.status,
+        },
+
+        // ----------------------------------------------
+        // Payout
+        // ----------------------------------------------
+
+        payout: {
+          _id:
+            payout._id,
+
+          totalBookingAmount:
+            payout.totalBookingAmount,
+
+          platformCommission:
+            payout.platformCommission,
+
+          netPayoutAmount:
+            payout.netPayoutAmount,
+
+          status:
+            payout.status,
+        },
+
+        // ----------------------------------------------
+        // Amount summary
+        // ----------------------------------------------
+
+        grossAmount:
+          finalGrossAmount,
+
+        discountAmount:
+          finalDiscountAmount,
+
+        totalAmount:
+          finalBookingAmount,
+
+        platformFeeAmount:
+          platformFeeAmount,
+
+        ownerAmount:
+          ownerAmount,
+
+        // ----------------------------------------------
+        // Booked slots
+        // ----------------------------------------------
+
+        bookedSlots:
+          lockedSlots.map(
+            slot => ({
+              _id:
+                slot._id,
+
+              court:
+                slot.court,
+
+              date:
+                slot.date,
+
+              startTime:
+                slot.startTime,
+
+              endTime:
+                slot.endTime,
+
+              price:
+                slot.price,
+
+              status:
+                slot.status,
+            }),
+          ),
+      });
+    } catch (error) {
+      // ==================================================
+      // ROLLBACK TRANSACTION
+      // ==================================================
+
+      try {
+        if (
+          session.inTransaction()
+        ) {
+          await session.abortTransaction();
+        }
+      } catch (
+        rollbackError
+      ) {
+        console.error(
+          'Transaction rollback error:',
+          rollbackError,
+        );
+      }
+
+      // ==================================================
+      // LOG ERROR
+      // ==================================================
+
+      console.error(
+        'DIRECT BOOKING API ERROR:',
+        error,
+      );
+
+      const errorMessage =
+        getErrorMessage(error);
+
+      // ==================================================
+      // DUPLICATE ERROR
+      // ==================================================
+
+      if (
+        errorMessage.includes(
+          'E11000',
+        ) ||
+        errorMessage
+          .toLowerCase()
+          .includes(
+            'duplicate',
+          )
+      ) {
+        res.status(409).json({
+          success: false,
+          message:
+            'One or more selected slots have already been booked.',
+        });
+        return;
+      }
+
+      // ==================================================
+      // SLOT CONFLICT
+      // ==================================================
+
+      if (
+        errorMessage
+          .toLowerCase()
+          .includes(
+            'booked by another user',
+          )
+      ) {
+        res.status(409).json({
+          success: false,
+          message:
+            errorMessage,
+        });
+        return;
+      }
+
+      // ==================================================
+      // GENERAL ERROR
+      // ==================================================
+
+      res.status(400).json({
+        success: false,
+        message:
+          errorMessage ||
+          'Booking could not be completed',
+      });
+    } finally {
+      // ==================================================
+      // CLOSE SESSION
+      // ==================================================
+
+      await session.endSession();
+    }
+  },
+);
+
+
 // ==========================================
 // 404 HANDLER
 // ==========================================

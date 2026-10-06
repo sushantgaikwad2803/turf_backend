@@ -1,9 +1,16 @@
+<<<<<<< HEAD
 import mongoose, {
   Schema,
+=======
+import {
+  Schema,
+  model,
+>>>>>>> 14c220b (success)
   Document,
   Types,
 } from 'mongoose';
 
+<<<<<<< HEAD
 export type BookingStatus =
   | 'pending'
   | 'confirmed'
@@ -20,11 +27,17 @@ export interface IBookingSlot {
   discountAmount: number;
   finalAmount: number;
 }
+=======
+// ======================================================
+// BOOKING INTERFACE
+// ======================================================
+>>>>>>> 14c220b (success)
 
 export interface IBooking extends Document {
   user: Types.ObjectId;
   turf: Types.ObjectId;
   court: Types.ObjectId;
+<<<<<<< HEAD
   coupon?: Types.ObjectId;
 
   /**
@@ -34,12 +47,21 @@ export interface IBooking extends Document {
   slots: IBookingSlot[];
 
   /** Summary fields for fast filtering/reporting. */
+=======
+  slot: Types.ObjectId;
+
+  coupon?: Types.ObjectId;
+
+>>>>>>> 14c220b (success)
   bookingDate: Date;
+
   startTime: string;
   endTime: string;
+
   grossAmount: number;
   discountAmount: number;
   finalAmount: number;
+<<<<<<< HEAD
   status: BookingStatus;
 
   /**
@@ -47,11 +69,20 @@ export interface IBooking extends Document {
    * can still be read during migration.
    */
   slot?: Types.ObjectId;
+=======
+
+  status:
+    | 'pending'
+    | 'confirmed'
+    | 'cancelled'
+    | 'completed';
+>>>>>>> 14c220b (success)
 
   createdAt: Date;
   updatedAt: Date;
 }
 
+<<<<<<< HEAD
 const BookingSlotSchema = new Schema<IBookingSlot>(
   {
     slot: {
@@ -108,6 +139,28 @@ const BookingSlotSchema = new Schema<IBookingSlot>(
 
 const BookingSchema = new Schema<IBooking>(
   {
+=======
+// ======================================================
+// TIME VALIDATION
+// ======================================================
+
+const START_TIME_REGEX =
+  /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+const END_TIME_REGEX =
+  /^(?:([01]\d|2[0-3]):([0-5]\d)|24:00)$/;
+
+// ======================================================
+// BOOKING SCHEMA
+// ======================================================
+
+const BookingSchema = new Schema<IBooking>(
+  {
+    // --------------------------------------------------
+    // USER
+    // --------------------------------------------------
+
+>>>>>>> 14c220b (success)
     user: {
       type: Schema.Types.ObjectId,
       ref: 'User',
@@ -115,6 +168,13 @@ const BookingSchema = new Schema<IBooking>(
       index: true,
     },
 
+<<<<<<< HEAD
+=======
+    // --------------------------------------------------
+    // TURF
+    // --------------------------------------------------
+
+>>>>>>> 14c220b (success)
     turf: {
       type: Schema.Types.ObjectId,
       ref: 'Turf',
@@ -122,6 +182,13 @@ const BookingSchema = new Schema<IBooking>(
       index: true,
     },
 
+<<<<<<< HEAD
+=======
+    // --------------------------------------------------
+    // COURT
+    // --------------------------------------------------
+
+>>>>>>> 14c220b (success)
     court: {
       type: Schema.Types.ObjectId,
       ref: 'Court',
@@ -129,10 +196,32 @@ const BookingSchema = new Schema<IBooking>(
       index: true,
     },
 
+<<<<<<< HEAD
+=======
+    // --------------------------------------------------
+    // SLOT
+    // One slot can only have one booking.
+    // --------------------------------------------------
+
+    slot: {
+      type: Schema.Types.ObjectId,
+      ref: 'Slot',
+      required: true,
+      unique: true,
+      index: true,
+    },
+
+    // --------------------------------------------------
+    // COUPON
+    // Optional
+    // --------------------------------------------------
+
+>>>>>>> 14c220b (success)
     coupon: {
       type: Schema.Types.ObjectId,
       ref: 'Coupon',
       required: false,
+<<<<<<< HEAD
     },
 
     slots: {
@@ -146,12 +235,22 @@ const BookingSchema = new Schema<IBooking>(
     },
 
     // Summary / reporting fields.
+=======
+      index: true,
+    },
+
+    // --------------------------------------------------
+    // BOOKING DATE
+    // --------------------------------------------------
+
+>>>>>>> 14c220b (success)
     bookingDate: {
       type: Date,
       required: true,
       index: true,
     },
 
+<<<<<<< HEAD
     startTime: {
       type: String,
       required: true,
@@ -162,32 +261,101 @@ const BookingSchema = new Schema<IBooking>(
       required: true,
     },
 
+=======
+    // --------------------------------------------------
+    // START TIME
+    // --------------------------------------------------
+
+    startTime: {
+      type: String,
+      required: true,
+      trim: true,
+
+      validate: {
+        validator: (value: string): boolean =>
+          START_TIME_REGEX.test(value),
+
+        message:
+          'startTime must be in HH:mm format (00:00-23:59)',
+      },
+    },
+
+    // --------------------------------------------------
+    // END TIME
+    // --------------------------------------------------
+
+    endTime: {
+      type: String,
+      required: true,
+      trim: true,
+
+      validate: {
+        validator: (value: string): boolean =>
+          END_TIME_REGEX.test(value),
+
+        message:
+          'endTime must be in HH:mm format (00:00-24:00)',
+      },
+    },
+
+    // --------------------------------------------------
+    // GROSS AMOUNT
+    // Amount before discount
+    // --------------------------------------------------
+
+>>>>>>> 14c220b (success)
     grossAmount: {
       type: Number,
       required: true,
       min: 0,
     },
 
+<<<<<<< HEAD
+=======
+    // --------------------------------------------------
+    // DISCOUNT AMOUNT
+    // --------------------------------------------------
+
+>>>>>>> 14c220b (success)
     discountAmount: {
       type: Number,
       default: 0,
       min: 0,
     },
 
+<<<<<<< HEAD
+=======
+    // --------------------------------------------------
+    // FINAL AMOUNT
+    // Amount actually paid by the user
+    // --------------------------------------------------
+
+>>>>>>> 14c220b (success)
     finalAmount: {
       type: Number,
       required: true,
       min: 0,
     },
 
+<<<<<<< HEAD
     status: {
       type: String,
+=======
+    // --------------------------------------------------
+    // BOOKING STATUS
+    // --------------------------------------------------
+
+    status: {
+      type: String,
+
+>>>>>>> 14c220b (success)
       enum: [
         'pending',
         'confirmed',
         'cancelled',
         'completed',
       ],
+<<<<<<< HEAD
       default: 'pending',
       index: true,
     },
@@ -201,10 +369,24 @@ const BookingSchema = new Schema<IBooking>(
     },
   },
   {
+=======
+
+      default: 'pending',
+
+      index: true,
+    },
+  },
+
+  {
+    // Automatically creates:
+    // createdAt
+    // updatedAt
+>>>>>>> 14c220b (success)
     timestamps: true,
   },
 );
 
+<<<<<<< HEAD
 // Useful for owner/customer booking history.
 BookingSchema.index({
   user: 1,
@@ -229,3 +411,41 @@ export const Booking =
   mongoose.model<IBooking>('Booking', BookingSchema);
 
 export default Booking;
+=======
+// ======================================================
+// INDEXES
+// ======================================================
+
+// Useful for owner's/user's booking history
+BookingSchema.index({
+  user: 1,
+  bookingDate: -1,
+});
+
+// Useful for turf booking queries
+BookingSchema.index({
+  turf: 1,
+  bookingDate: -1,
+});
+
+// Useful for court/date queries
+BookingSchema.index({
+  court: 1,
+  bookingDate: 1,
+});
+
+// Useful for status-based dashboard queries
+BookingSchema.index({
+  status: 1,
+  bookingDate: -1,
+});
+
+// ======================================================
+// MODEL
+// ======================================================
+
+export const Booking = model<IBooking>(
+  'Booking',
+  BookingSchema,
+);
+>>>>>>> 14c220b (success)
