@@ -5500,30 +5500,199 @@ app.post('/api/bookings/create',
           const selectedSlot of
             bookingGroup.slots
         ) {
-          const slotId =
+          const rawSlotId =
             typeof selectedSlot ===
             'string'
               ? selectedSlot
               : selectedSlot?.id;
 
-          if (!slotId) {
+          if (!rawSlotId) {
             throw new Error(
               'Every selected slot must contain an id',
             );
           }
 
+          /*
+           * The correct slot id is the MongoDB ObjectId.
+           * Older frontend builds may send a temporary key:
+           *
+           *   YYYY-MM-DD_<courtId>_<startMinutes>
+           *
+           * Resolve that key to the real Slot._id so booking
+           * remains compatible while the frontend is updated.
+           */
+          let resolvedSlotId =
+            String(rawSlotId).trim();
+
           if (
             !isValidObjectId(
-              String(slotId),
+              resolvedSlotId,
             )
           ) {
-            throw new Error(
-              `Invalid slot id: ${slotId}`,
-            );
+            const syntheticMatch =
+              resolvedSlotId.match(
+                /^(\d{4}-\d{2}-\d{2})_([a-fA-F0-9]{24})_(\d{1,4})$/,
+              );
+
+            if (!syntheticMatch) {
+              throw new Error(
+                `Invalid slot id: ${resolvedSlotId}`,
+              );
+            }
+
+            const [
+              ,
+              syntheticDate,
+              syntheticCourtId,
+              syntheticStartMinutes,
+            ] = syntheticMatch;
+
+            if (
+              syntheticCourtId !==
+              String(courtObjectId)
+            ) {
+              throw new Error(
+                'Selected slot does not belong to the selected court',
+              );
+            }
+
+            const requestedDateKey =
+              String(
+                bookingGroup.date,
+              ).slice(0, 10);
+
+            if (
+              syntheticDate !==
+              requestedDateKey
+            ) {
+              throw new Error(
+                `Slot date mismatch: ${resolvedSlotId}`,
+              );
+            }
+
+            const targetStartMinutes =
+              Number(
+                syntheticStartMinutes,
+              );
+
+            if (
+              !Number.isInteger(
+                targetStartMinutes,
+              ) ||
+              targetStartMinutes < 0 ||
+              targetStartMinutes > 1439
+            ) {
+              throw new Error(
+                `Invalid slot time in slot id: ${resolvedSlotId}`,
+              );
+            }
+
+            const dayStart =
+              new Date(
+                `${syntheticDate}T00:00:00.000Z`,
+              );
+
+            const dayEnd =
+              new Date(
+                `${syntheticDate}T23:59:59.999Z`,
+              );
+
+            const candidateSlots =
+              await Slot.find({
+                court:
+                  courtObjectId,
+                date: {
+                  $gte: dayStart,
+                  $lte: dayEnd,
+                },
+              })
+                .session(session)
+                .lean();
+
+            const parseSlotStartMinutes =
+              (value: unknown): number => {
+                const normalized =
+                  String(value ?? '')
+                    .trim()
+                    .toUpperCase();
+
+                const match =
+                  normalized.match(
+                    /^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/,
+                  );
+
+                if (!match) {
+                  return -1;
+                }
+
+                let hour =
+                  Number(match[1]);
+                const minute =
+                  Number(match[2]);
+                const period =
+                  match[3];
+
+                if (
+                  !Number.isInteger(
+                    hour,
+                  ) ||
+                  !Number.isInteger(
+                    minute,
+                  ) ||
+                  minute < 0 ||
+                  minute > 59
+                ) {
+                  return -1;
+                }
+
+                if (period === 'AM') {
+                  if (hour === 12) {
+                    hour = 0;
+                  }
+                } else if (
+                  period === 'PM'
+                ) {
+                  if (hour !== 12) {
+                    hour += 12;
+                  }
+                }
+
+                if (
+                  hour < 0 ||
+                  hour > 23
+                ) {
+                  return -1;
+                }
+
+                return (
+                  hour * 60 +
+                  minute
+                );
+              };
+
+            const resolvedSlot =
+              candidateSlots.find(
+                slot =>
+                  parseSlotStartMinutes(
+                    slot.startTime,
+                  ) ===
+                  targetStartMinutes,
+              );
+
+            if (!resolvedSlot) {
+              throw new Error(
+                `Slot ${resolvedSlotId} no longer exists in the database`,
+              );
+            }
+
+            resolvedSlotId =
+              String(
+                resolvedSlot._id,
+              );
           }
 
           selectedSlots.push({
-            slotId: String(slotId),
+            slotId: resolvedSlotId,
             date: String(
               bookingGroup.date,
             ),
