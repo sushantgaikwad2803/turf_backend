@@ -4476,7 +4476,10 @@ app.get('/api/slots', async (req, res) => {
           slot.status === 'blocked',
       )
       .map((slot) => ({
-        slotId: `${dateString}_${courtId}_${slot.startTime}`,
+        // slotId is the real MongoDB Slot._id.
+        // bookingKey is only for frontend/UI matching.
+        slotId: String(slot._id),
+        bookingKey: `${dateString}_${courtId}_${slot.startTime}`,
         startTime: slot.startTime,
         endTime: slot.endTime,
         status: slot.status,
