@@ -2148,9 +2148,9 @@ app.get('/api/users/:userId/bookings',
       }
 
       const bookings =
-        await Booking.find({
-          user: toObjectId(userId),
-        })
+        await Booking.find()
+          .where('user')
+          .equals(toObjectId(userId))
           .populate(
             'turf',
             'name address city images',
@@ -2158,6 +2158,10 @@ app.get('/api/users/:userId/bookings',
           .populate(
             'court',
             'name sport',
+          )
+          .populate(
+            'slots.slot',
+            'startTime endTime price date status',
           )
           .sort({
             bookingDate: -1,
@@ -3137,11 +3141,9 @@ app.get('/api/owners/:ownerId/dashboard',
       // ------------------------------------
 
       const bookings =
-        await Booking.find({
-          turf: {
-            $in: turfIds,
-          },
-        })
+        await Booking.find()
+          .where('turf')
+          .in(turfIds)
           .populate(
             'user',
             'name email phone',
@@ -3155,8 +3157,8 @@ app.get('/api/owners/:ownerId/dashboard',
             'name sport',
           )
           .populate(
-            'slot',
-            'startTime endTime price',
+            'slots.slot',
+            'startTime endTime price date status',
           )
           .sort({
             bookingDate: -1,
@@ -3187,6 +3189,23 @@ app.get('/api/owners/:ownerId/dashboard',
         startTime: string;
         endTime: string;
         price: number;
+        date?: Date;
+        status?: string;
+      };
+
+      type DashboardBookingSlot = {
+        _id?: mongoose.Types.ObjectId;
+        slot:
+          | PopulatedSlot
+          | mongoose.Types.ObjectId
+          | null;
+        bookingDate: Date;
+        startTime: string;
+        endTime: string;
+        price: number;
+        grossAmount: number;
+        discountAmount: number;
+        finalAmount: number;
       };
 
       type DashboardBooking = {
@@ -3204,20 +3223,13 @@ app.get('/api/owners/:ownerId/dashboard',
           | PopulatedCourt
           | null;
 
-        slot?:
-          | PopulatedSlot
-          | null;
+        slots: DashboardBookingSlot[];
 
         bookingDate: Date;
-
         startTime: string;
-
         endTime: string;
-
         grossAmount: number;
-
         discountAmount: number;
-
         finalAmount: number;
 
         status:
@@ -3234,8 +3246,7 @@ app.get('/api/owners/:ownerId/dashboard',
 
       const bookingIds =
         populatedBookings.map(
-          (booking) =>
-            booking._id,
+          (booking) => booking._id,
         );
 
       // ------------------------------------
@@ -3556,20 +3567,13 @@ app.get('/api/owners/:ownerId/dashboard',
                 booking.user
                   ? {
                       _id:
-                        booking.user
-                          ._id,
-
+                        booking.user._id,
                       name:
-                        booking.user
-                          .name,
-
+                        booking.user.name,
                       email:
-                        booking.user
-                          .email,
-
+                        booking.user.email,
                       phone:
-                        booking.user
-                          .phone,
+                        booking.user.phone,
                     }
                   : null,
 
@@ -3577,16 +3581,11 @@ app.get('/api/owners/:ownerId/dashboard',
                 booking.turf
                   ? {
                       _id:
-                        booking.turf
-                          ._id,
-
+                        booking.turf._id,
                       name:
-                        booking.turf
-                          .name,
-
+                        booking.turf.name,
                       city:
-                        booking.turf
-                          .city,
+                        booking.turf.city,
                     }
                   : null,
 
@@ -3594,35 +3593,87 @@ app.get('/api/owners/:ownerId/dashboard',
                 booking.court
                   ? {
                       _id:
-                        booking.court
-                          ._id,
-
+                        booking.court._id,
                       name:
-                        booking.court
-                          .name,
-
+                        booking.court.name,
                       sport:
-                        booking.court
-                          .sport,
+                        booking.court.sport,
                     }
                   : null,
 
-              slot:
-                booking.slot
-                  ? {
+              // --------------------------------
+              // ALL SLOTS IN THIS BOOKING
+              // --------------------------------
+
+              slotCount:
+                booking.slots.length,
+
+              slots:
+                booking.slots.map(
+                  (bookingSlot) => {
+                    const slot =
+                      bookingSlot.slot;
+
+                    const populatedSlot =
+                      slot &&
+                      typeof slot === 'object' &&
+                      '_id' in slot
+                        ? slot as PopulatedSlot
+                        : null;
+
+                    return {
+                      _id:
+                        bookingSlot._id,
+
+                      slotId:
+                        populatedSlot?._id ??
+                        bookingSlot.slot,
+
+                      bookingDate:
+                        bookingSlot.bookingDate,
+
                       startTime:
-                        booking.slot
-                          .startTime,
+                        bookingSlot.startTime,
 
                       endTime:
-                        booking.slot
-                          .endTime,
+                        bookingSlot.endTime,
 
                       price:
-                        booking.slot
-                          .price,
-                    }
-                  : null,
+                        bookingSlot.price,
+
+                      grossAmount:
+                        bookingSlot.grossAmount,
+
+                      discountAmount:
+                        bookingSlot.discountAmount,
+
+                      finalAmount:
+                        bookingSlot.finalAmount,
+
+                      slotDetails:
+                        populatedSlot
+                          ? {
+                              _id:
+                                populatedSlot._id,
+                              startTime:
+                                populatedSlot.startTime,
+                              endTime:
+                                populatedSlot.endTime,
+                              price:
+                                populatedSlot.price,
+                              date:
+                                populatedSlot.date,
+                              status:
+                                populatedSlot.status,
+                            }
+                          : null,
+                    };
+                  },
+                ),
+
+              // --------------------------------
+              // BOOKING SUMMARY
+              // --------------------------------
 
               bookingDate:
                 booking.bookingDate,
@@ -4076,12 +4127,10 @@ app.get('/api/admin/dashboard',
       );
 
       const recentBookings =
-        await Booking.find({
-          bookingDate: {
-            $gte: sevenDaysAgo,
-            $lte: endOfToday,
-          },
-        })
+        await Booking.find()
+          .where('bookingDate')
+          .gte(sevenDaysAgo as any)
+          .lte(endOfToday as any)
           .populate(
             'user',
             'name email phone',
@@ -5833,13 +5882,20 @@ app.post('/api/bookings/create',
       }
 
       // ==================================================
-      // CREATE BOOKING DOCUMENTS
+      // CREATE ONE BOOKING DOCUMENT
       //
-      // ONE BOOKING PER SLOT
+      // IMPORTANT:
+      // One checkout can contain multiple slots.
+      //
+      // Example:
+      // 3 selected slots =
+      //   3 Slot documents (status = booked)
+      //   1 Booking document (slots = [slot1, slot2, slot3])
+      //
+      // DO NOT create one Booking document per slot.
       // ==================================================
 
-      const bookingDocuments: any[] =
-        [];
+      const bookingSlots: any[] = [];
 
       for (
         const selected of selectedSlots
@@ -5861,14 +5917,13 @@ app.post('/api/bookings/create',
           );
 
         // ----------------------------------------------
-        // Proportional discount
+        // Allocate the checkout discount proportionally
+        // to each selected slot.
         // ----------------------------------------------
 
         let slotDiscount = 0;
 
-        if (
-          finalGrossAmount > 0
-        ) {
+        if (finalGrossAmount > 0) {
           slotDiscount =
             finalDiscountAmount *
             (slotPrice /
@@ -5889,27 +5944,11 @@ app.post('/api/bookings/create',
             ),
           );
 
-        bookingDocuments.push({
-          user:
-            userObjectId,
-
-          turf:
-            turfObjectId,
-
-          court:
-            courtObjectId,
-
+        bookingSlots.push({
           slot:
             new mongoose.Types.ObjectId(
               selected.slotId,
             ),
-
-          ...(couponObjectId
-            ? {
-                coupon:
-                  couponObjectId,
-              }
-            : {}),
 
           bookingDate:
             new Date(
@@ -5922,6 +5961,11 @@ app.post('/api/bookings/create',
           endTime:
             slot.endTime,
 
+          price:
+            roundMoney(
+              slotPrice,
+            ),
+
           grossAmount:
             roundMoney(
               slotPrice,
@@ -5932,58 +5976,104 @@ app.post('/api/bookings/create',
 
           finalAmount:
             slotFinalAmount,
-
-          status:
-            'confirmed',
         });
       }
 
+      if (bookingSlots.length === 0) {
+        throw new Error(
+          'At least one booking slot is required',
+        );
+      }
+
+      // Keep the selected-slot order for the
+      // top-level booking summary.
+      const firstSelectedSlot =
+        bookingSlots[0];
+
+      const lastSelectedSlot =
+        bookingSlots[
+          bookingSlots.length - 1
+        ];
+
+      if (
+        !firstSelectedSlot ||
+        !lastSelectedSlot
+      ) {
+        throw new Error(
+          'Booking slots could not be prepared',
+        );
+      }
+
       // ==================================================
-      // INSERT BOOKINGS
+      // INSERT EXACTLY ONE BOOKING DOCUMENT
       // ==================================================
 
-      const createdBookings =
-        await Booking.insertMany(
-          bookingDocuments,
+      const createdBookingDocuments =
+        await Booking.create(
+          [
+            {
+              user:
+                userObjectId,
+
+              turf:
+                turfObjectId,
+
+              court:
+                courtObjectId,
+
+              ...(couponObjectId
+                ? {
+                    coupon:
+                      couponObjectId,
+                  }
+                : {}),
+
+              // ALL SELECTED SLOTS LIVE
+              // INSIDE THIS ONE BOOKING.
+              slots:
+                bookingSlots,
+
+              // Summary fields are retained
+              // for dashboard/reporting and
+              // backward-compatible consumers.
+              bookingDate:
+                firstSelectedSlot.bookingDate,
+
+              startTime:
+                firstSelectedSlot.startTime,
+
+              endTime:
+                lastSelectedSlot.endTime,
+
+              grossAmount:
+                finalGrossAmount,
+
+              discountAmount:
+                finalDiscountAmount,
+
+              finalAmount:
+                finalBookingAmount,
+
+              status:
+                'confirmed',
+            },
+          ],
           {
             session,
           },
         );
 
-      // ==================================================
-      // TYPESCRIPT SAFETY
-      // ==================================================
-
       if (
-        !createdBookings ||
-        createdBookings.length === 0
+        !createdBookingDocuments ||
+        createdBookingDocuments.length === 0
       ) {
         throw new Error(
-          'Booking records could not be created',
+          'Booking record could not be created',
         );
       }
-
-      // ==================================================
-      // VERY IMPORTANT
-      //
-      // DO NOT USE:
-      //
-      // createdBookings[0]._id
-      //
-      // directly.
-      //
-      // TypeScript may consider [0]
-      // possibly undefined.
-      // ==================================================
 
       const firstBooking =
-        createdBookings[0];
-
-      if (!firstBooking) {
-        throw new Error(
-          'First booking record could not be created',
-        );
-      }
+        createdBookingDocuments[0];
 
       // ==================================================
       // PLATFORM FEE
@@ -6138,59 +6228,63 @@ app.post('/api/bookings/create',
           'Booking confirmed and payment successful',
 
         // ----------------------------------------------
-        // Booking IDs
+        // Booking ID
         // ----------------------------------------------
 
+        // Keep bookingIds as an array for frontend
+        // compatibility, but it contains ONLY ONE ID.
         bookingIds:
-          createdBookings.map(
-            booking =>
-              booking._id,
-          ),
+          [firstBooking._id],
+
+        // Also expose a singular bookingId for
+        // consumers that need one parent booking.
+        bookingId:
+          firstBooking._id,
 
         // ----------------------------------------------
-        // Bookings
+        // ONE BOOKING WITH MANY SLOTS
         // ----------------------------------------------
 
         bookings:
-          createdBookings.map(
-            booking => ({
+          [
+            {
               _id:
-                booking._id,
+                firstBooking._id,
 
               user:
-                booking.user,
+                firstBooking.user,
 
               turf:
-                booking.turf,
+                firstBooking.turf,
 
               court:
-                booking.court,
+                firstBooking.court,
 
-              slot:
-                booking.slot,
+              slots:
+                firstBooking.slots,
 
               bookingDate:
-                booking.bookingDate,
+                firstBooking.bookingDate,
 
               startTime:
-                booking.startTime,
+                firstBooking.startTime,
 
               endTime:
-                booking.endTime,
+                firstBooking.endTime,
 
               grossAmount:
-                booking.grossAmount,
+                firstBooking.grossAmount,
 
               discountAmount:
-                booking.discountAmount,
+                firstBooking.discountAmount,
 
               finalAmount:
-                booking.finalAmount,
+                firstBooking.finalAmount,
 
               status:
-                booking.status,
-            }),
-          ),
+                firstBooking.status,
+            },
+          ],
 
         // ----------------------------------------------
         // Payment
